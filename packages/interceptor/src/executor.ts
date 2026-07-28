@@ -62,21 +62,15 @@ export interface ExecutorToolOptions {
 }
 
 /**
- * ⚠ 阻塞项：核心包的 `ToolRisk` 目前放不下这个工具。
+ * 阻塞于核心包移除 `ToolRisk`，见 design.md §4.4。
  *
- * 现有四档 `read | write | destructive | navigation` 都要求风险在**注册时**就已知，
- * 而执行器工具的风险要到请求发出那一刻才能判定。硬塞进 `read` 会造成一个静默的
- * 洞：一旦拦截器没装，它就成了一个完全不受管的万能写入口。
+ * 执行器工具在现有风险枚举里**无处安放**：四档都要求风险在注册时已知，而它的风险
+ * 要到请求发出那一刻才判定。但正确的解法不是加一档，而是认识到 `risk` 这个自声明
+ * 字段本身就该被名单取代——它无法验证，一个偷偷写库的 `read` 工具是静默绕过闸门的。
  *
- * 建议在核心包新增一档 `'delegated'`，语义是「副作用由下游拦截治理」，并让
- * `ToolRegistry` 强制：
- *
- * - `delegated` 工具不得声明 `prepare`（它没有可展示的确认内容）；
- * - 注册 `delegated` 工具时必须已启用拦截治理，否则**启动即报错**——把「忘装
- *   拦截器」从一个运行期的静默缺口变成一个部署前的硬失败。
- *
- * 这是一处核心契约变更，需单独拍板，见 design.md §4.4。在此之前本函数不实现。
+ * 改造后本函数产出的工具不带 `risk`：它只是一个没有 `prepare` 的一阶段工具，
+ * 其副作用由拦截器按真实请求逐个定级。
  */
 export function defineExecutorTool(_options: ExecutorToolOptions): ToolDefinition {
-  throw new Error('Not implemented: 阻塞于核心包 ToolRisk 新增 delegated 档，见 design.md §4.4')
+  throw new Error('Not implemented: 阻塞于核心包移除 ToolRisk，见 design.md §4.4')
 }
