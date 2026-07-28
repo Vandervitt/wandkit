@@ -22,6 +22,8 @@ export interface SnapshotElement {
   value?: string
   disabled?: boolean
   checked?: boolean
+  /** 只读：模型据此不再尝试往里打字。 */
+  readonly?: boolean
 }
 
 export interface PageSnapshot {
@@ -42,6 +44,30 @@ const CANDIDATE_SELECTOR = [
 ].join(',')
 
 /**
+ * 「这个 readonly 输入框其实是个下拉选择器」的识别线索。
+ *
+ * 需要它是因为：组件库普遍用 `<input readonly>` 加浮层来实现下拉，而**不提供任何
+ * ARIA**。Element UI 的 `<el-select>` 就渲染成一个 readonly 的 text input，光看
+ * HTML 语义无法与「只读展示字段」区分开——两者的正确操作完全相反（一个要点开选，
+ * 一个碰都不该碰）。
+ *
+ * 这里是本包唯一依赖 CSS class 的地方，因此要说清它为什么可以：组件库的类名
+ * （`el-select`）是**公开的主题化接口**，随库版本走，不会被构建工具哈希；被哈希的是
+ * CSS Modules / scoped 样式那类应用自有类名。二者性质不同。
+ *
+ * 仍然做成可覆盖的：换 UI 库时补一条选择器即可，不必改本包。
+ */
+export const DEFAULT_COMBOBOX_ANCESTORS = [
+  '[role="combobox"]',
+  '.el-select',
+  '.el-date-editor',
+  '.el-cascader',
+  '.el-time-select',
+  '.ant-select',
+  '.ant-picker'
+]
+
+/**
  * 快照，外加与 `elements` 下标一一对应的真实元素引用。
  *
  * 两者必须在**同一次遍历**里产出：分两次筛选的话，任何一侧的条件改动都会让下标
@@ -52,14 +78,23 @@ export interface CaptureResult {
   elements: Element[]
 }
 
+export interface CaptureOptions {
+  /** 覆盖下拉选择器的识别线索，见 {@link DEFAULT_COMBOBOX_ANCESTORS}。 */
+  comboboxAncestors?: readonly string[]
+}
+
 /** 读取当前页面，同时保留元素引用。 */
-export function capturePageWithElements(root: ParentNode = document): CaptureResult {
+export function capturePageWithElements(
+  root: ParentNode = document,
+  options: CaptureOptions = {}
+): CaptureResult {
   const snapshotElements: SnapshotElement[] = []
   const domElements: Element[] = []
+  const comboboxAncestors = options.comboboxAncestors ?? DEFAULT_COMBOBOX_ANCESTORS
 
   root.querySelectorAll(CANDIDATE_SELECTOR).forEach(element => {
     if (!isVisible(element)) return
-    const role = roleOf(element)
+    const role = roleOf(element, comboboxAncestors)
     if (!role || !INTERACTIVE_ROLES.has(role)) return
 
     const snapshot: SnapshotElement = {
@@ -71,6 +106,7 @@ export function capturePageWithElements(root: ParentNode = document): CaptureRes
     if (value) snapshot.value = value
     if (isDisabled(element)) snapshot.disabled = true
     if (isChecked(element)) snapshot.checked = true
+    if (role !== 'combobox' && isReadonly(element)) snapshot.readonly = true
     snapshotElements.push(snapshot)
     domElements.push(element)
   })
@@ -86,8 +122,11 @@ export function capturePageWithElements(root: ParentNode = document): CaptureRes
 }
 
 /** 读取当前页面。 */
-export function capturePage(root: ParentNode = document): PageSnapshot {
-  return capturePageWithElements(root).snapshot
+export function capturePage(
+  root: ParentNode = document,
+  options: CaptureOptions = {}
+): PageSnapshot {
+  return capturePageWithElements(root, options).snapshot
 }
 
 /**
@@ -112,7 +151,10 @@ export function formatSnapshot(snapshot: PageSnapshot): string {
  *
  * 显式 `role` 优先——组件库常用 `<div role="button">` 实现按钮，只看标签名会整片漏掉。
  */
-function roleOf(element: Element): string | undefined {
+function roleOf(
+  element: Element,
+  comboboxAncestors: readonly string[]
+): string | undefined {
   const explicit = element.getAttribute('role')?.trim()
   if (explicit) return explicit
 
@@ -128,8 +170,18 @@ function roleOf(element: Element): string | undefined {
   if (type === 'radio') return 'radio'
   if (type === 'button' || type === 'submit' || type === 'reset') return 'button'
   if (type === 'hidden') return undefined
+  // readonly 的输入框若被下拉容器包着，它其实是选择器的显示部分（Element UI 的
+  // el-select 就长这样）。判成 textbox 会让模型去打字，而那在这类组件上完全无效。
+  if (isReadonly(element) && element.closest(comboboxAncestors.join(','))) {
+    return 'combobox'
+  }
   if (type === 'search') return 'searchbox'
   return 'textbox'
+}
+
+function isReadonly(element: Element): boolean {
+  return (element as HTMLInputElement).readOnly === true ||
+    element.getAttribute('aria-readonly') === 'true'
 }
 
 /**

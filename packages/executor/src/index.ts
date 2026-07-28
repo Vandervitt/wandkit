@@ -17,12 +17,14 @@
 export {
   capturePage,
   capturePageWithElements,
-  formatSnapshot
+  formatSnapshot,
+  DEFAULT_COMBOBOX_ANCESTORS
 } from './snapshot'
 export type {
   PageSnapshot,
   SnapshotElement,
-  CaptureResult
+  CaptureResult,
+  CaptureOptions
 } from './snapshot'
 
 export { PageController } from './controller'

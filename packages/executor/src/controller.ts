@@ -32,6 +32,11 @@ export class PageController {
   input(index: number, text: string): void {
     const element = this.elementAt(index)
     assertEnabled(element)
+    // 只读控件必须先于「能否输入」判断：组件库常用 readonly input 实现下拉，
+    // 往里赋值不会报错但也毫无效果，模型会误以为筛选条件已经填好了。
+    if (isReadonlyElement(element)) {
+      throw new Error(`索引 ${index} 的元素是只读的，无法输入；若是下拉选择器请改用选择`)
+    }
     if (!isTextInput(element)) {
       throw new Error(`索引 ${index} 的元素不支持输入（${element.tagName.toLowerCase()}）`)
     }
@@ -94,6 +99,11 @@ function isTextInput(element: Element): boolean {
   if (tag !== 'input') return element.getAttribute('contenteditable') === 'true'
   const type = (element as HTMLInputElement).type.toLowerCase()
   return !['checkbox', 'radio', 'button', 'submit', 'reset', 'file'].includes(type)
+}
+
+function isReadonlyElement(element: Element): boolean {
+  return (element as HTMLInputElement).readOnly === true ||
+    element.getAttribute('aria-readonly') === 'true'
 }
 
 function assertEnabled(element: Element): void {
