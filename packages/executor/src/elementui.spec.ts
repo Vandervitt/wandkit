@@ -141,6 +141,46 @@ describe('Element UI —— readonly 输入框（通用规则）', () => {
   })
 })
 
+describe('容器不得吞掉整棵子树的文本', () => {
+  /**
+   * 真实后台实测：Element UI 侧边栏的 `<ul class="el-menu">` 有 104 个可交互后代，
+   * 取子树 textContent 会得到一个 236 字符、把所有菜单项串在一起的名字——既无法
+   * 辨识，又白烧 token。
+   */
+  const MENU = `
+    <ul role="menu">
+      <li role="menuitem"><div style="cursor:pointer">系统管理</div>
+        <ul role="menu">
+          <li role="menuitem"><div style="cursor:pointer">用户管理</div></li>
+          <li role="menuitem"><div style="cursor:pointer">角色管理</div></li>
+        </ul>
+      </li>
+    </ul>`
+
+  it('容器名不含后代文本', () => {
+    render(MENU)
+
+    const names = capturePage().elements.map(e => e.name)
+    expect(names).not.toContain('系统管理用户管理角色管理')
+    expect(names.every(n => n.length < 20)).toBe(true)
+  })
+
+  it('无名纯容器整个不收录，真正可点的子项照常收录', () => {
+    render(MENU)
+
+    expect(capturePage().elements.map(e => e.name).sort())
+      .toEqual(['用户管理', '系统管理', '角色管理'].sort())
+  })
+
+  it('有自己直接文本的容器仍然收录', () => {
+    render(`<li role="menuitem">系统管理<ul role="menu">
+      <li role="menuitem"><span style="cursor:pointer">用户管理</span></li>
+    </ul></li>`)
+
+    expect(capturePage().elements.map(e => e.name)).toContain('系统管理')
+  })
+})
+
 describe('cursor 兜底不得产出重复项', () => {
   /**
    * 真实浏览器实测发现的问题：`<button><span>删除</span></button>` 里 button 按标签

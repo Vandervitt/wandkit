@@ -1,4 +1,15 @@
-import { capturePageWithElements, formatSnapshot, type PageSnapshot } from './snapshot'
+import {
+  capturePageWithElements,
+  formatSnapshot,
+  type CaptureOptions,
+  type PageSnapshot
+} from './snapshot'
+import {
+  waitForDomStable,
+  watchRouteChanges,
+  type RouteWatcher,
+  type WaitForStableOptions
+} from './routeWatcher'
 
 /**
  * 页面控制器：持有「上一次快照的索引 → 真实元素」的映射，并在其上执行动作。
@@ -8,19 +19,66 @@ import { capturePageWithElements, formatSnapshot, type PageSnapshot } from './sn
  * 校验元素是否仍在文档中，宁可报错也不能操作到错的元素上——后者会让模型基于一个
  * 错误的成功前提继续推理下去。
  */
+export interface PageControllerOptions extends CaptureOptions {
+  /**
+   * 是否侦测路由变化并自动作废索引，缺省开启。
+   *
+   * 关掉的话，SPA 路由切换后模型仍可能拿着旧索引操作——虽然 `elementAt` 的脱离文档
+   * 检查能兜住，但报错来得晚且说不清原因。
+   */
+  watchRoute?: boolean
+  /** 传给 {@link waitForDomStable} 的参数。 */
+  stable?: WaitForStableOptions
+}
+
 export class PageController {
   private captured: Element[] | null = null
+  private readonly options: PageControllerOptions
+  private routeWatcher?: RouteWatcher
+  /** 路由已变、但尚未重新抓取。此时任何按旧索引的操作都必须被拒绝。 */
+  private routeChangedAt: string | null = null
+
+  constructor(options: PageControllerOptions = {}) {
+    this.options = options
+    if (options.watchRoute !== false) {
+      this.routeWatcher = watchRouteChanges({
+        onRouteChange: url => {
+          // 不在这里自动重抓：抓取时机应由调用方决定（通常是模型下一次读页面），
+          // 这里只负责把旧索引钉死，避免它被继续使用。
+          this.captured = null
+          this.routeChangedAt = url
+        }
+      })
+    }
+  }
 
   /** 重新读取当前页面，并刷新索引映射。 */
   capture(root: ParentNode = document): PageSnapshot {
-    const { snapshot, elements } = capturePageWithElements(root)
+    const { snapshot, elements } = capturePageWithElements(root, this.options)
     this.captured = elements
+    this.routeChangedAt = null
     return snapshot
+  }
+
+  /**
+   * 等 DOM 稳定后再读取。
+   *
+   * 路由切换或提交之后应当用它：立刻抓取会拿到骨架屏、未渲染完的菜单一类的半成品。
+   */
+  async captureStable(root: ParentNode = document): Promise<PageSnapshot> {
+    await waitForDomStable(this.options.stable)
+    return this.capture(root)
   }
 
   /** 当前快照的文本形式，直接交给模型。 */
   format(root: ParentNode = document): string {
     return formatSnapshot(this.capture(root))
+  }
+
+  /** 停止路由侦测并还原被包装的 history 方法。 */
+  dispose(): void {
+    this.routeWatcher?.stop()
+    this.routeWatcher = undefined
   }
 
   click(index: number): void {
@@ -79,6 +137,11 @@ export class PageController {
    * 模式的核心约束，模型很容易拿着上一轮的索引继续操作。
    */
   private elementAt(index: number): Element {
+    if (this.routeChangedAt) {
+      throw new Error(
+        `页面已跳转到 ${this.routeChangedAt}，此前的索引全部失效，请重新读取页面`
+      )
+    }
     if (!this.captured) {
       throw new Error('请先 capture 当前页面，再按索引操作')
     }

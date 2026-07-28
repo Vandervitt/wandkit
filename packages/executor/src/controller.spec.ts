@@ -52,6 +52,55 @@ describe('PageController —— 索引回指', () => {
   })
 })
 
+describe('PageController —— 路由变化作废索引', () => {
+  it('路由跳转后旧索引立即失效，报错点明原因', async () => {
+    render('<button>A</button>')
+    const controller = new PageController()
+    controller.capture()
+
+    history.pushState({}, '', '/other-page')
+    await Promise.resolve()
+
+    expect(() => controller.click(0)).toThrow(/已跳转|重新读取/)
+    controller.dispose()
+  })
+
+  it('重新读取后恢复可用', async () => {
+    render('<button>A</button>')
+    const controller = new PageController()
+    controller.capture()
+    history.pushState({}, '', '/another')
+    await Promise.resolve()
+
+    controller.capture()
+
+    expect(() => controller.click(0)).not.toThrow()
+    controller.dispose()
+  })
+
+  it('关闭 watchRoute 后不再侦测', async () => {
+    render('<button>A</button>')
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    history.pushState({}, '', '/no-watch')
+    await Promise.resolve()
+
+    expect(() => controller.click(0)).not.toThrow()
+    controller.dispose()
+  })
+
+  it('dispose 后还原 history 方法', () => {
+    const original = history.pushState
+    const controller = new PageController()
+    expect(history.pushState).not.toBe(original)
+
+    controller.dispose()
+
+    expect(history.pushState).toBe(original)
+  })
+})
+
 describe('PageController —— 输入', () => {
   it('写入文本并派发 input/change 事件，框架才能感知', () => {
     render('<input type="text" aria-label="关键词">')

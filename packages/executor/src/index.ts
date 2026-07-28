@@ -17,7 +17,8 @@
 export {
   capturePage,
   capturePageWithElements,
-  formatSnapshot
+  formatSnapshot,
+  DEFAULT_VIEWPORT_EXPANSION
 } from './snapshot'
 export type {
   PageSnapshot,
@@ -27,6 +28,19 @@ export type {
 } from './snapshot'
 
 export { PageController } from './controller'
+export type { PageControllerOptions } from './controller'
+
+export {
+  watchRouteChanges,
+  waitForDomStable,
+  DEFAULT_QUIET_MS,
+  DEFAULT_STABLE_TIMEOUT_MS
+} from './routeWatcher'
+export type {
+  RouteWatcher,
+  RouteWatcherOptions,
+  WaitForStableOptions
+} from './routeWatcher'
 
 export { createPageTools } from './tools'
 export type { PageToolOptions } from './tools'
