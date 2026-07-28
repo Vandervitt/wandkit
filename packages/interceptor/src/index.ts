@@ -40,7 +40,7 @@ export {
   SAFE_METHODS,
   EVALUATION_ORDER
 } from './policy'
-export type { EvaluateOptions } from './policy'
+export type { EvaluateOptions, FindMatchingRuleOptions } from './policy'
 
 // ── 归属判定 ──────────────────────────────────────────────────────
 export {

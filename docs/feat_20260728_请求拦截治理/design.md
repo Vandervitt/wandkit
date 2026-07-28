@@ -187,10 +187,12 @@ type Verdict =
 |---|---|---|---|
 | 1 | 非 Agent 发起 | `allow` | 用户自己的操作不归闸门管 |
 | 2 | 处于已授权窗口 | `allow` | 路径 A 已确认过，见 §7 |
-| 3 | 安全方法（GET/HEAD/OPTIONS/TRACE） | `allow` | 无副作用 |
-| 4 | 命中**名单 B（danger）** | `confirm` as `destructive` | **必须先于名单 A** |
+| 3 | 命中**名单 B（danger）** | `confirm` as `destructive` | **必须先于名单 A，也先于安全方法放行** |
+| 4 | 安全方法（GET/HEAD/OPTIONS/TRACE） | `allow` | 无副作用 |
 | 5 | 命中**名单 A（allow）** | `allow` | 已知安全的写 |
 | 6 | 兜底 | `confirm` as `write` | **默认拒绝** |
+
+**第 3 步为何要先于第 4 步**（实现阶段修正的排序）：GET 并非总是安全——`GET /api/export-all-data` 这类导出接口没有副作用却会外泄数据。若安全方法先短路，这类请求将永远无法被名单拦下。把危险名单提前，既保住「GET 默认廉价放行」，又留出显式拦截危险读的能力。
 
 **第 4 步先于第 5 步是本设计最关键的一条。** 名单 A 往往写成宽泛通配（`POST /api/*/search`），若让它先匹配，一条粗糙的放行规则就可能把高危动作一并放过。危险优先于放行，是安全策略的通例。
 
