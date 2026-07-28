@@ -250,6 +250,26 @@ function cssEscape(value: string): string {
   return escape ? escape(value) : value.replace(/["\\]/g, '\\$&')
 }
 
+/**
+ * 值一律不进快照的输入类型。
+ *
+ * 快照会被原样发给模型（进而离开浏览器、可能被厂商留存），因此凭据绝不能出现在
+ * 里面。这不是「最好别」而是硬红线：本包的核心主张之一就是 Key 与凭据不进前端
+ * 链路，快照泄漏密码等于把这条主张从背面拆掉。
+ *
+ * 真实浏览器实测发现的问题——jsdom 夹具里没有密码框，测不出来。
+ */
+const SECRET_INPUT_TYPES = new Set(['password'])
+
+/**
+ * 名字看起来像凭据的字段，同样不取值。
+ *
+ * 覆盖那些出于「方便查看」把 `type` 写成 `text` 的密码框、验证码和令牌输入。
+ * 宁可多脱敏几个字段（模型顶多少一点上下文），也不能漏掉一个真凭据。
+ */
+const SECRET_NAME_PATTERN =
+  /pass|pwd|secret|token|credential|captcha|verif|otp|密码|口令|密钥|验证码/i
+
 function valueOf(element: Element): string | undefined {
   const tag = element.tagName.toLowerCase()
   if (tag === 'select') return (element as HTMLSelectElement).value || undefined
@@ -260,7 +280,26 @@ function valueOf(element: Element): string | undefined {
   // 按钮的 value 是它的标签文字，已进 name，再放一次就是噪声。
   if (type === 'button' || type === 'submit' || type === 'reset') return undefined
   if (type === 'checkbox' || type === 'radio') return undefined
-  return input.value || undefined
+  if (!input.value) return undefined
+  return isSecretField(input) ? '[已脱敏]' : input.value
+}
+
+/**
+ * 判定一个字段是否承载凭据。
+ *
+ * 三个信号任一命中即脱敏：`type=password`、`autocomplete` 声明了密码语义、
+ * 以及 name/id/placeholder/aria-label 里出现凭据字样。
+ */
+function isSecretField(input: HTMLInputElement): boolean {
+  if (SECRET_INPUT_TYPES.has(input.type.toLowerCase())) return true
+  if (/password/i.test(input.getAttribute('autocomplete') ?? '')) return true
+  const hints = [
+    input.getAttribute('name'),
+    input.getAttribute('id'),
+    input.getAttribute('placeholder'),
+    input.getAttribute('aria-label')
+  ].filter(Boolean).join(' ')
+  return SECRET_NAME_PATTERN.test(hints)
 }
 
 function isDisabled(element: Element): boolean {
