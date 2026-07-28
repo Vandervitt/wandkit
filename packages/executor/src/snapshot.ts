@@ -24,7 +24,49 @@ export interface SnapshotElement {
   checked?: boolean
   /** 只读：模型据此不再尝试往里打字。 */
   readonly?: boolean
+  /**
+   * 嵌套层级（仅在被收录的元素之间计算）。
+   *
+   * 表格里五行数据的五个「删除」按钮，扁平清单下完全无法区分；带上层级、格式化成
+   * 缩进之后，模型才能判断该点哪一个。
+   */
+  depth: number
+  /**
+   * 白名单内的补充属性，见 {@link DISCLOSED_ATTRIBUTES}。
+   *
+   * 主要用途是给图标按钮一个身份——真实后台里三成元素没有任何文本。
+   */
+  attributes?: Record<string, string>
+  /**
+   * 所在行 / 卡片的文本，用于消歧同名元素。
+   *
+   * 表格里每行都有一个「删除」，仅凭名字模型无从选择；带上「国光科技」这样的行上下文
+   * 才能定位。层级缩进解决不了这个问题——行本身通常不可交互，不会进入快照。
+   */
+  context?: string
+  /**
+   * 相对上一次抓取是新出现的。
+   *
+   * 由 {@link PageController} 跨抓取比对后标注，纯函数的 `capturePage` 不设置它。
+   * 它直接回答「我刚才那次点击造成了什么」——下拉展开、弹窗出现全靠它辨认。
+   */
+  isNew?: boolean
 }
+
+/**
+ * 允许进入快照的属性白名单。
+ *
+ * 取自 page-agent 的同名清单，但**移除了 `value`**：它由 {@link valueOf} 单独处理并
+ * 做凭据脱敏，照搬会把密码明文送进模型。
+ */
+const DISCLOSED_ATTRIBUTES = [
+  'title', 'type', 'name', 'role', 'placeholder', 'alt',
+  'aria-label', 'aria-expanded', 'aria-checked', 'aria-haspopup',
+  'aria-controls', 'id', 'for', 'target', 'contenteditable', 'data-date-format'
+]
+
+/** 属性值截断长度。超长的 title 与 id 会迅速吃掉预算，而辨识只需要前几个字。 */
+const MAX_ATTRIBUTE_LENGTH = 20
 
 export interface PageSnapshot {
   title: string
@@ -159,6 +201,8 @@ export function capturePageWithElements(
 
   const doc = ownerDocumentOf(root)
   const cache = new MeasureCache(doc?.defaultView ?? null)
+  /** 已收录且仍包含当前元素的祖先栈，用于算层级。 */
+  const ancestors: Element[] = []
   // jsdom 一类环境没有布局引擎，所有盒模型度量恒为 0。此时视口与遮挡判定会把一切
   // 都判成「不可见」，因此先探测一次，无布局时整体跳过这两项。
   const layout = hasLayout(doc, cache)
@@ -175,18 +219,39 @@ export function capturePageWithElements(
     // 那才是该操作的目标。实测中侧边菜单的 `<ul>` / `<li>` 就属于这一类。
     if (!name && hasInteractiveDescendant(element, cache)) return
 
+    // 层级：文档序遍历下，栈里留着的都是当前元素的祖先。逐个弹出不再包含它的，
+    // 剩余深度即为它在「被收录元素」这棵树里的层级。
+    while (ancestors.length > 0 &&
+      !ancestors[ancestors.length - 1].contains(element)) {
+      ancestors.pop()
+    }
+
     const snapshot: SnapshotElement = {
       index: snapshotElements.length,
       role,
-      name
+      name,
+      depth: ancestors.length
     }
     const value = valueOf(element)
     if (value) snapshot.value = value
     if (isDisabled(element)) snapshot.disabled = true
     if (isChecked(element)) snapshot.checked = true
     if (isReadonly(element)) snapshot.readonly = true
+    const attributes = disclosedAttributes(element, name)
+    if (attributes) snapshot.attributes = attributes
+    // 既没有名字、也没有任何可辨识属性的**非语义**元素直接丢弃。
+    //
+    // 真实主页实测这类元素占三成，全是折叠箭头一类的装饰性图标。模型无法指称它们，
+    // 更不该去点一个自己都说不清是什么的东西——而它们仍在实打实地吃 token。
+    //
+    // 语义控件（input/textarea/button 等）豁免：一个没有 label 的输入框仍然是可以
+    // 填写的，模型能靠位置和上下文推断它的用途；装饰性 div 则不然。
+    if (!name && !attributes && !element.matches(SEMANTIC_LEAF_SELECTOR)) return
+    const context = rowContext(element, name)
+    if (context) snapshot.context = context
     snapshotElements.push(snapshot)
     domElements.push(element)
+    ancestors.push(element)
   })
 
   return {
@@ -288,9 +353,14 @@ export function capturePage(
 export function formatSnapshot(snapshot: PageSnapshot): string {
   if (snapshot.elements.length === 0) return '(当前页面没有可交互元素)'
   return snapshot.elements.map(element => {
-    const parts = [`[${element.index}]`, element.role]
+    // 缩进表达层级；`*` 表示相对上次抓取新出现，直接回答「刚才那次操作造成了什么」。
+    const indent = '  '.repeat(element.depth)
+    const marker = element.isNew ? '*' : ''
+    const parts = [`${indent}${marker}[${element.index}]`, element.role]
     if (element.name) parts.push(element.name)
     if (element.value) parts.push(`= "${element.value}"`)
+    // 行上下文用括号跟在后面：一屏五个「删除」全靠它区分。
+    if (element.context) parts.push(`(${element.context})`)
     if (element.checked) parts.push('(checked)')
     // 只读要明确告诉模型：它唯一能做的是点击，不要试图往里打字。
     if (element.readonly) parts.push('(readonly)')
@@ -414,8 +484,19 @@ function accessibleName(element: Element, cache?: MeasureCache): string {
   const placeholder = element.getAttribute('placeholder')
   if (placeholder?.trim()) return collapse(placeholder)
 
+  // 凭据字段到此为止：`title` 与 `value` 都可能装着密码本身（真实页面里
+  // `title="admin123"` 这种写法确实存在），名字只允许来自 label / aria-label /
+  // placeholder 这些必然是说明文字的来源。
+  if (isSecretElement(element)) return ''
+
   const title = element.getAttribute('title')
   return title?.trim() ? collapse(title) : ''
+}
+
+/** 元素是否为承载凭据的输入框。 */
+function isSecretElement(element: Element): boolean {
+  return element.tagName.toLowerCase() === 'input' &&
+    isSecretField(element as HTMLInputElement)
 }
 
 /** `<label for>` 与包裹式 `<label>` 两种写法都要认。 */
@@ -549,6 +630,60 @@ function isVisible(
  *
  * 先查选择器（命中即返回，快），查不到再扫 cursor（慢），因此常见情况下开销很低。
  */
+/** 承载「一条记录」语义的容器。行上下文从这些元素上取。 */
+const ROW_CONTAINER_SELECTOR = 'tr,li,[role="row"],[role="listitem"],[role="option"]'
+
+/** 行上下文的长度上限。超出说明取到的多半是整块区域而非一条记录。 */
+const MAX_CONTEXT_LENGTH = 60
+
+/**
+ * 取元素所在行 / 列表项的文本，用于消歧同名元素。
+ *
+ * 这是表格场景的刚需：一屏五个「删除」，模型仅凭名字无法选择。层级缩进解决不了——
+ * `<tr>` 通常既无 `role` 也无 `tabindex`，本身不可交互，不会进入快照。
+ *
+ * 只取最近的一层行容器，且长度超限即放弃：取到整块区域的文本反而会淹没有效信息。
+ */
+function rowContext(element: Element, name: string): string | undefined {
+  const row = element.parentElement?.closest(ROW_CONTAINER_SELECTOR)
+  if (!row) return undefined
+  // 必须是**叶子行**。真实页面实测：Element UI 侧边栏的 `<li>` 包着整个子菜单，
+  // 取它的文本会得到一整段菜单名拼接，是噪声而非消歧信息。含嵌套行容器的说明它是
+  // 区块不是记录。
+  if (row.querySelector(ROW_CONTAINER_SELECTOR)) return undefined
+  const text = collapse(row.textContent ?? '')
+  if (!text || text === name || text.length > MAX_CONTEXT_LENGTH) return undefined
+  // 去掉元素自身的名字，剩下的才是「这一行是谁」。
+  const withoutSelf = name ? collapse(text.split(name).join(' ')) : text
+  return withoutSelf || undefined
+}
+
+/**
+ * 收集白名单内的属性，供模型辨识那些没有文本的元素。
+ *
+ * 三条过滤：与 `name` 完全相同的不重复输出（纯噪声）、超长的截断、凭据字段整体跳过
+ * ——`title="admin123"` 这类把密码写进属性的情况真实存在。
+ */
+function disclosedAttributes(
+  element: Element,
+  name: string
+): Record<string, string> | undefined {
+  const secret = isSecretElement(element)
+  const collected: Record<string, string> = {}
+
+  DISCLOSED_ATTRIBUTES.forEach(attribute => {
+    const raw = element.getAttribute(attribute)
+    if (raw === null) return
+    const value = collapse(raw)
+    if (!value || value === name) return
+    collected[attribute] = secret
+      ? '[已脱敏]'
+      : value.slice(0, MAX_ATTRIBUTE_LENGTH)
+  })
+
+  return Object.keys(collected).length > 0 ? collected : undefined
+}
+
 function hasInteractiveDescendant(element: Element, cache?: MeasureCache): boolean {
   // 语义叶子永远是「目标」而非「容器」：`<button>` 里的 `<span>`、`<i>` 只是装饰，
   // 它的名字理应取整段文本。不豁免的话按钮会因为内部有可点子元素而被整个跳过。

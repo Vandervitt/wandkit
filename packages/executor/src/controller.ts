@@ -33,6 +33,8 @@ export interface PageControllerOptions extends CaptureOptions {
 
 export class PageController {
   private captured: Element[] | null = null
+  /** 上一次抓取见过的元素，用于标注新出现的那些。首次抓取前为 `null`。 */
+  private seen: WeakSet<Element> | null = null
   private readonly options: PageControllerOptions
   private routeWatcher?: RouteWatcher
   /** 路由已变、但尚未重新抓取。此时任何按旧索引的操作都必须被拒绝。 */
@@ -55,6 +57,15 @@ export class PageController {
   /** 重新读取当前页面，并刷新索引映射。 */
   capture(root: ParentNode = document): PageSnapshot {
     const { snapshot, elements } = capturePageWithElements(root, this.options)
+    // 标注新元素：上一次没见过的，说明是刚才那次操作弄出来的（下拉展开、弹窗出现）。
+    // 首次抓取不标记——那时整页都是新的，全标等于没标。
+    if (this.seen) {
+      const seen = this.seen
+      elements.forEach((element, index) => {
+        if (!seen.has(element)) snapshot.elements[index].isNew = true
+      })
+    }
+    this.seen = new WeakSet(elements)
     this.captured = elements
     this.routeChangedAt = null
     return snapshot
