@@ -241,3 +241,39 @@ P1-4 又是两处只有真实页面才暴露的问题：
 
 **教训**：主页那种简单页面验证不了消歧类能力。列表页才是这类后台的真实形态，应当
 作为默认的验证目标。
+
+## 11. 跨框架验证
+
+此前全部验证来自 Vue 2 + Element UI 单一技术栈，存在「针对单一框架调优」的风险。
+补充三种结构截然不同的形态，在真实浏览器中实测：
+
+| 形态 | 关键差异 | 结果 |
+|---|---|---|
+| **纯 HTML** | 零框架，`label[for]` 跨兄弟关联 | ✅ 全部识别 |
+| **Ant Design（React）** | `<a>` 当按钮、`role` 挂在 readonly input 上 | ✅ 行上下文与 combobox 均正常 |
+| **Shadow DOM** | DOM 边界隔离 | ⚠️ 需显式穿透（P2） |
+
+Ant Design 的表格实测输出，与 Element UI 完全一致的质量：
+
+```
+编辑→AntD行一   删除→AntD行一
+编辑→AntD行二   删除→AntD行二
+```
+
+### 源码审计
+
+`grep` 全部源文件确认：**代码中零框架 API**（无 `__vue__` / `_vnode` / `$refs` /
+`__reactFiber` / `__ngContext`）。Vue、React、Element UI 仅出现在注释里用于解释设计
+理由。实际依赖的全部是 Web 标准：
+
+`getAttribute`（aria-* / placeholder / contenteditable）、`querySelector`、`closest`、
+`matches`、`getComputedStyle`、`getBoundingClientRect`、`getClientRects`、
+`elementFromPoint`、`MutationObserver`、`history.pushState` / `popstate` / `hashchange`
+
+唯一「像框架」的地方是 `role="combobox"` 一类 ARIA 属性，但那是 W3C 标准而非框架约定。
+
+### 一处澄清
+
+真实浏览器测试中曾出现「纯 HTML 的 `label[for]` 失效」，排查后确认是**一次性验证探针
+漏写了该分支**，源码 `labelText()` 中一直存在且有测试覆盖（`snapshot.spec.ts:75`）。
+教训：临时探针不能当作实现的等价物，跨框架结论必须回落到正式测试。
