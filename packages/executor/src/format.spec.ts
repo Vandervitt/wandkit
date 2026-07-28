@@ -137,11 +137,55 @@ describe('行上下文——表格里同名按钮的真正解法', () => {
     expect(capturePage().elements[0].context).toBeUndefined()
   })
 
-  it('行文本过长时放弃——那多半取到了整块区域而非一条记录', () => {
+  it('真实表格行取首格作标识，而非整行文本', () => {
+    // 真实后台实测：一行 187 字符（含状态、计费、时间等 10 个单元格），整行文本既超长
+    // 又淹没重点；而首格 "wzp ID: 76" 恰好就是这条记录的标识。首列即标识是后台表格的
+    // 通例。
+    render(`
+      <table><tbody>
+        <tr>
+          <td>wzp ID: 76</td><td>启用 并发: 10 任务: 0 坐席: 1</td>
+          <td>admin（1916）账号: admin</td><td>后付 单独计费 余额: -0.02</td>
+          <td><button>详情</button><button>编辑</button></td>
+        </tr>
+      </tbody></table>`)
+
+    expect(capturePage().elements.map(e => ({ name: e.name, context: e.context })))
+      .toEqual([
+        { name: '详情', context: 'wzp ID: 76' },
+        { name: '编辑', context: 'wzp ID: 76' }
+      ])
+  })
+
+  it('行内含下拉菜单等嵌套列表时依然取得到首格', () => {
+    // 真实页面的操作列带「更多」下拉，其浮层里是 <li>，会让整行不再是「叶子行」。
+    render(`
+      <table><tbody>
+        <tr>
+          <td>国光科技</td>
+          <td><button>详情</button>
+            <ul><li>删除</li><li>停用</li></ul>
+          </td>
+        </tr>
+      </tbody></table>`)
+
+    expect(capturePage().elements.find(e => e.name === '详情')?.context)
+      .toBe('国光科技')
+  })
+
+  it('列表项文本过长时放弃——那多半取到了整块区域而非一条记录', () => {
+    render(`<ul><li>${'很长的说明'.repeat(20)}<button>删除</button></li></ul>`)
+
+    expect(capturePage().elements[0].context).toBeUndefined()
+  })
+
+  it('表格首格超长时截断而非丢弃——它仍是这一行唯一的标识', () => {
     render(`<table><tbody><tr><td>${'很长的说明'.repeat(20)}</td>
       <td><button>删除</button></td></tr></tbody></table>`)
 
-    expect(capturePage().elements[0].context).toBeUndefined()
+    const context = capturePage().elements[0].context ?? ''
+    expect(context.length).toBeLessThanOrEqual(60)
+    expect(context.length).toBeGreaterThan(0)
   })
 })
 

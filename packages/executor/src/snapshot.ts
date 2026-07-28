@@ -630,8 +630,14 @@ function isVisible(
  *
  * 先查选择器（命中即返回，快），查不到再扫 cursor（慢），因此常见情况下开销很低。
  */
+/** 表格行。它有「首格即标识」这个可利用的结构，与列表项分开处理。 */
+const TABLE_ROW_SELECTOR = 'tr,[role="row"]'
+
+/** 表格单元格。取首个即为该行的标识列。 */
+const TABLE_CELL_SELECTOR = 'td,th,[role="cell"],[role="gridcell"],[role="rowheader"]'
+
 /** 承载「一条记录」语义的容器。行上下文从这些元素上取。 */
-const ROW_CONTAINER_SELECTOR = 'tr,li,[role="row"],[role="listitem"],[role="option"]'
+const ROW_CONTAINER_SELECTOR = `${TABLE_ROW_SELECTOR},li,[role="listitem"],[role="option"]`
 
 /** 行上下文的长度上限。超出说明取到的多半是整块区域而非一条记录。 */
 const MAX_CONTEXT_LENGTH = 60
@@ -647,13 +653,28 @@ const MAX_CONTEXT_LENGTH = 60
 function rowContext(element: Element, name: string): string | undefined {
   const row = element.parentElement?.closest(ROW_CONTAINER_SELECTOR)
   if (!row) return undefined
-  // 必须是**叶子行**。真实页面实测：Element UI 侧边栏的 `<li>` 包着整个子菜单，
-  // 取它的文本会得到一整段菜单名拼接，是噪声而非消歧信息。含嵌套行容器的说明它是
-  // 区块不是记录。
+
+  // 表格行取**首格**，而不是整行文本。
+  //
+  // 真实后台实测：一行有 10 个单元格、187 个字符（状态、计费、时间全在里面），整行
+  // 文本既超长又淹没重点；而首格 `wzp ID: 76` 恰好就是这条记录的标识。首列即标识
+  // 是后台表格的通例。
+  //
+  // 这条路径也不要求「叶子行」——真实操作列常带「更多」下拉，其浮层里是 `<li>`，
+  // 会让整行不再是叶子，但首格依然有效。
+  if (row.matches(TABLE_ROW_SELECTOR)) {
+    const cell = row.querySelector(TABLE_CELL_SELECTOR)
+    const text = collapse(cell?.textContent ?? '')
+    if (!text || text === name) return undefined
+    return text.slice(0, MAX_CONTEXT_LENGTH)
+  }
+
+  // 列表项没有「单元格」概念，只能取整体文本，因此必须是**叶子**且不超长：
+  // Element UI 侧边栏的 `<li>` 包着整个子菜单，取它的文本会得到一整段菜单名拼接。
   if (row.querySelector(ROW_CONTAINER_SELECTOR)) return undefined
   const text = collapse(row.textContent ?? '')
   if (!text || text === name || text.length > MAX_CONTEXT_LENGTH) return undefined
-  // 去掉元素自身的名字，剩下的才是「这一行是谁」。
+  // 去掉元素自身的名字，剩下的才是「这一项是谁」。
   const withoutSelf = name ? collapse(text.split(name).join(' ')) : text
   return withoutSelf || undefined
 }
