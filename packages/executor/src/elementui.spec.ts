@@ -90,15 +90,17 @@ describe('Element UI —— el-input', () => {
   })
 })
 
-describe('Element UI —— el-select（真实栈上的关键分歧）', () => {
-  it('必须识别为 combobox，而不是可输入的文本框', () => {
-    // el-select 渲染的是 readonly 的 text input。若判成 textbox，模型会尝试往里
-    // 打字——那在 Element UI 上完全无效，且会让模型误以为已经填好了筛选条件。
+describe('Element UI —— el-select（框架无关的处理方式）', () => {
+  it('标记为只读，不臆测它是下拉框', () => {
+    // el-select 渲染的是 readonly 的 text input。原始 DOM 里没有任何信息能把它与
+    // 「只读展示字段」区分开——Element UI 不提供 ARIA。因此只陈述事实（只读、
+    // 不可输入），不靠类名去猜它的组件类型。
+    // Agent 拿到「只读」就知道唯一能做的是点击；点开后重读页面，选项自然出现。
     render(EL_SELECT)
 
     expect(capturePage().elements[0]).toMatchObject({
-      role: 'combobox',
-      name: '公司状态'
+      name: '公司状态',
+      readonly: true
     })
   })
 
@@ -110,7 +112,7 @@ describe('Element UI —— el-select（真实栈上的关键分歧）', () => {
     expect(names).not.toContain('启用')
   })
 
-  it('拒绝向 combobox 打字，并提示改用选择', () => {
+  it('拒绝向只读控件打字，并提示改用选择', () => {
     render(EL_SELECT)
     const controller = new PageController()
     controller.capture()
@@ -139,6 +141,39 @@ describe('Element UI —— readonly 输入框（通用规则）', () => {
   })
 })
 
+describe('cursor 兜底不得产出重复项', () => {
+  /**
+   * 真实浏览器实测发现的问题：`<button><span>删除</span></button>` 里 button 按标签
+   * 命中，内层 span 因继承了 cursor:pointer 又命中一次，快照出现两条「删除」。
+   * 模型无从选择，且嵌套越深重复越多。
+   */
+  it('按钮内的 span 不单独成项', () => {
+    render(`<button class="el-button" style="cursor:pointer">
+      <i class="el-icon-delete" style="cursor:pointer"></i><span style="cursor:pointer">删除</span>
+    </button>`)
+
+    const names = capturePage().elements.map(e => e.name)
+    expect(names).toEqual(['删除'])
+  })
+
+  it('包着按钮的可点容器不单独成项', () => {
+    render(`<div style="cursor:pointer">
+      <button style="cursor:pointer">修改</button>
+    </div>`)
+
+    expect(capturePage().elements.map(e => e.name)).toEqual(['修改'])
+  })
+
+  it('表格操作列的两个按钮各出现一次', () => {
+    render(`<td class="el-table__cell"><div class="cell" style="cursor:auto">
+      <button class="el-button" style="cursor:pointer"><span style="cursor:pointer">修改</span></button>
+      <button class="el-button" style="cursor:pointer"><span style="cursor:pointer">删除</span></button>
+    </div></td>`)
+
+    expect(capturePage().elements.map(e => e.name)).toEqual(['修改', '删除'])
+  })
+})
+
 describe('Element UI —— 整页快照', () => {
   it('查询表单渲染成模型可读的清单', () => {
     render(`<form class="el-form el-form--inline">${EL_INPUT}${EL_SELECT}
@@ -147,8 +182,55 @@ describe('Element UI —— 整页快照', () => {
 
     expect(formatSnapshot(capturePage())).toBe([
       '[0] textbox 请输入名称',
-      '[1] combobox 公司状态',
+      '[1] textbox 公司状态 (readonly)',
       '[2] button 搜索'
     ].join('\n'))
+  })
+})
+
+describe('Element UI —— 下拉打开后靠重读发现选项', () => {
+  /**
+   * 这组用例守的是「无状态逐步重读」的核心承诺：**不需要预先知道组件类型**。
+   *
+   * Agent 看到只读控件 → 点它 → 重读页面 → 选项已成为普通可点元素 → 选中。
+   * 全程没有任何一处依赖 `.el-select` 这类框架类名。
+   */
+  it('打开前抓不到选项，打开后抓得到', () => {
+    render(EL_SELECT)
+    expect(capturePage().elements.map(e => e.name)).not.toContain('停用')
+
+    // 模拟点开：Element UI 移除浮层的 display:none
+    const dropdown = document.querySelector('.el-select-dropdown') as HTMLElement
+    dropdown.style.display = ''
+    // 真实页面里下拉项由 CSS 赋予 cursor:pointer；jsdom 无样式表，这里显式给上，
+    // 等价于真实浏览器中的渲染结果（已在 aicc 页面实测：值为 pointer）。
+    document.querySelectorAll('.el-select-dropdown__item').forEach(item => {
+      (item as HTMLElement).style.cursor = 'pointer'
+    })
+
+    const names = capturePage().elements.map(e => e.name)
+    expect(names).toContain('停用')
+    expect(names).toContain('启用')
+  })
+
+  it('选项即使是纯 li 也能被点击（无 role 无 tabindex）', () => {
+    render(EL_SELECT)
+    const dropdown = document.querySelector('.el-select-dropdown') as HTMLElement
+    dropdown.style.display = ''
+    document.querySelectorAll('.el-select-dropdown__item').forEach(item => {
+      (item as HTMLElement).style.cursor = 'pointer'
+    })
+
+    let clicked = ''
+    document.querySelectorAll('.el-select-dropdown__item').forEach(item => {
+      item.addEventListener('click', () => { clicked = item.textContent?.trim() ?? '' })
+    })
+
+    const controller = new PageController()
+    const snapshot = controller.capture()
+    const target = snapshot.elements.find(e => e.name === '启用')
+    controller.click(target?.index as number)
+
+    expect(clicked).toBe('启用')
   })
 })

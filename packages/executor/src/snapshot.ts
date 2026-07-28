@@ -44,28 +44,23 @@ const CANDIDATE_SELECTOR = [
 ].join(',')
 
 /**
- * 「这个 readonly 输入框其实是个下拉选择器」的识别线索。
+ * 语义标签之外，还要靠**渲染事实**兜住的那一类可点元素。
  *
- * 需要它是因为：组件库普遍用 `<input readonly>` 加浮层来实现下拉，而**不提供任何
- * ARIA**。Element UI 的 `<el-select>` 就渲染成一个 readonly 的 text input，光看
- * HTML 语义无法与「只读展示字段」区分开——两者的正确操作完全相反（一个要点开选，
- * 一个碰都不该碰）。
+ * 组件库大量使用无语义标签实现交互：Element UI 的下拉选项就是纯 `<li>`，既没有
+ * `role` 也没有 `tabindex`，光按选择器一个都抓不到（真实浏览器实测确认）。
  *
- * 这里是本包唯一依赖 CSS class 的地方，因此要说清它为什么可以：组件库的类名
- * （`el-select`）是**公开的主题化接口**，随库版本走，不会被构建工具哈希；被哈希的是
- * CSS Modules / scoped 样式那类应用自有类名。二者性质不同。
+ * `cursor: pointer` 是这里唯一可靠且框架无关的信号：
  *
- * 仍然做成可覆盖的：换 UI 库时补一条选择器即可，不必改本包。
+ * - 它是**计算样式**，即浏览器渲染后的事实，不是类名——构建工具哈希的是类名，
+ *   样式值本身不受影响；
+ * - 它跨框架成立：任何 UI 库把某个东西做成可点的，都会给它 `pointer`，否则用户
+ *   根本看不出那里能点；
+ * - 实测区分度良好：下拉项与按钮均为 `pointer`，普通文本为 `auto`。
+ *
+ * 这条规则替代了早期一版基于 `.el-select` 类名的适配——那违反了「只用生产构建后
+ * 存活的信息」这条原则，且换个 UI 库就失效。
  */
-export const DEFAULT_COMBOBOX_ANCESTORS = [
-  '[role="combobox"]',
-  '.el-select',
-  '.el-date-editor',
-  '.el-cascader',
-  '.el-time-select',
-  '.ant-select',
-  '.ant-picker'
-]
+const CLICKABLE_CURSOR = 'pointer'
 
 /**
  * 快照，外加与 `elements` 下标一一对应的真实元素引用。
@@ -79,8 +74,13 @@ export interface CaptureResult {
 }
 
 export interface CaptureOptions {
-  /** 覆盖下拉选择器的识别线索，见 {@link DEFAULT_COMBOBOX_ANCESTORS}。 */
-  comboboxAncestors?: readonly string[]
+  /**
+   * 是否把 `cursor: pointer` 的元素也算作可点，缺省开启。
+   *
+   * 关掉会漏掉组件库用无语义标签实现的交互（下拉选项、自定义菜单项）；开着的代价是
+   * 每个候选都要算一次样式。只有在明确知道页面全部使用语义标签时才值得关。
+   */
+  detectClickableCursor?: boolean
 }
 
 /** 读取当前页面，同时保留元素引用。 */
@@ -90,11 +90,14 @@ export function capturePageWithElements(
 ): CaptureResult {
   const snapshotElements: SnapshotElement[] = []
   const domElements: Element[] = []
-  const comboboxAncestors = options.comboboxAncestors ?? DEFAULT_COMBOBOX_ANCESTORS
+  const detectCursor = options.detectClickableCursor !== false
+  const candidates = detectCursor
+    ? root.querySelectorAll('*')
+    : root.querySelectorAll(CANDIDATE_SELECTOR)
 
-  root.querySelectorAll(CANDIDATE_SELECTOR).forEach(element => {
+  candidates.forEach(element => {
     if (!isVisible(element)) return
-    const role = roleOf(element, comboboxAncestors)
+    const role = roleOf(element, detectCursor)
     if (!role || !INTERACTIVE_ROLES.has(role)) return
 
     const snapshot: SnapshotElement = {
@@ -106,7 +109,7 @@ export function capturePageWithElements(
     if (value) snapshot.value = value
     if (isDisabled(element)) snapshot.disabled = true
     if (isChecked(element)) snapshot.checked = true
-    if (role !== 'combobox' && isReadonly(element)) snapshot.readonly = true
+    if (isReadonly(element)) snapshot.readonly = true
     snapshotElements.push(snapshot)
     domElements.push(element)
   })
@@ -141,6 +144,8 @@ export function formatSnapshot(snapshot: PageSnapshot): string {
     if (element.name) parts.push(element.name)
     if (element.value) parts.push(`= "${element.value}"`)
     if (element.checked) parts.push('(checked)')
+    // 只读要明确告诉模型：它唯一能做的是点击，不要试图往里打字。
+    if (element.readonly) parts.push('(readonly)')
     if (element.disabled) parts.push('(disabled)')
     return parts.join(' ')
   }).join('\n')
@@ -151,10 +156,7 @@ export function formatSnapshot(snapshot: PageSnapshot): string {
  *
  * 显式 `role` 优先——组件库常用 `<div role="button">` 实现按钮，只看标签名会整片漏掉。
  */
-function roleOf(
-  element: Element,
-  comboboxAncestors: readonly string[]
-): string | undefined {
+function roleOf(element: Element, detectCursor: boolean): string | undefined {
   const explicit = element.getAttribute('role')?.trim()
   if (explicit) return explicit
 
@@ -163,20 +165,46 @@ function roleOf(
   if (tag === 'a') return element.hasAttribute('href') ? 'link' : undefined
   if (tag === 'select') return 'combobox'
   if (tag === 'textarea') return 'textbox'
-  if (tag !== 'input') return undefined
 
-  const type = (element as HTMLInputElement).type.toLowerCase()
-  if (type === 'checkbox') return 'checkbox'
-  if (type === 'radio') return 'radio'
-  if (type === 'button' || type === 'submit' || type === 'reset') return 'button'
-  if (type === 'hidden') return undefined
-  // readonly 的输入框若被下拉容器包着，它其实是选择器的显示部分（Element UI 的
-  // el-select 就长这样）。判成 textbox 会让模型去打字，而那在这类组件上完全无效。
-  if (isReadonly(element) && element.closest(comboboxAncestors.join(','))) {
-    return 'combobox'
+  if (tag === 'input') {
+    const type = (element as HTMLInputElement).type.toLowerCase()
+    if (type === 'checkbox') return 'checkbox'
+    if (type === 'radio') return 'radio'
+    if (type === 'button' || type === 'submit' || type === 'reset') return 'button'
+    if (type === 'hidden') return undefined
+    if (type === 'search') return 'searchbox'
+    return 'textbox'
   }
-  if (type === 'search') return 'searchbox'
-  return 'textbox'
+
+  if (element.hasAttribute('contenteditable')) {
+    return element.getAttribute('contenteditable') === 'true' ? 'textbox' : undefined
+  }
+  if (element.hasAttribute('tabindex')) return 'button'
+  // 兜底：没有任何语义、但渲染成可点的元素，见 CLICKABLE_CURSOR。
+  return detectCursor && isCursorClickable(element) ? 'button' : undefined
+}
+
+/**
+ * 该元素是否被渲染成「可点」，且它自己就是那次点击的最佳代表。
+ *
+ * `cursor: pointer` 会向下继承，因此一个可点的东西往往整条祖先链都命中。不去重的话
+ * `<button><span>删除</span></button>` 会产出两条都叫「删除」的记录——模型无从选择，
+ * 快照也会随嵌套深度膨胀。
+ *
+ * 三条排除规则，都只作用于「靠 cursor 兜底」这条路径，语义标签不受影响：
+ */
+function isCursorClickable(element: Element): boolean {
+  const view = element.ownerDocument.defaultView
+  if (!view) return false
+  if (view.getComputedStyle(element).cursor !== CLICKABLE_CURSOR) return false
+  // 1. 祖先已经是语义可交互元素——那才是该点的目标，本元素只是它的内部结构
+  //    （`<button>` 里的 `<span>`、`<i>` 图标）。
+  if (element.parentElement?.closest(CANDIDATE_SELECTOR)) return false
+  // 2. 内部含语义可交互元素——本元素只是容器，真正该点的是里面那个。
+  if (element.querySelector(CANDIDATE_SELECTOR)) return false
+  // 3. 还有更内层的可点元素——取最内层，它对应的点击目标更精确。
+  return !Array.from(element.children).some(child =>
+    view.getComputedStyle(child).cursor === CLICKABLE_CURSOR)
 }
 
 function isReadonly(element: Element): boolean {

@@ -17,8 +17,7 @@
 export {
   capturePage,
   capturePageWithElements,
-  formatSnapshot,
-  DEFAULT_COMBOBOX_ANCESTORS
+  formatSnapshot
 } from './snapshot'
 export type {
   PageSnapshot,
