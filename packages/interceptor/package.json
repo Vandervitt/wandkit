@@ -1,0 +1,45 @@
+{
+  "name": "@toolairlock/interceptor",
+  "version": "0.1.0",
+  "description": "Default-deny request interception for toolairlock. Governs writes that were never declared as tools.",
+  "keywords": [
+    "toolairlock",
+    "human-in-the-loop",
+    "guardrails",
+    "interception"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": [
+    "./dist/index.js",
+    "./dist/index.cjs"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "toolairlock": "^0.1.0"
+  },
+  "devDependencies": {
+    "toolairlock": "^0.1.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
