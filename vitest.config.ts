@@ -7,7 +7,8 @@ export default defineConfig({
     environment: 'node',
     environmentMatchGlobs: [
       // UI 包是 Web Components，需要 DOM
-      ['packages/ui/**', 'jsdom']
+      ['packages/ui/**', 'jsdom'],
+      ['packages/executor/**', 'jsdom']
     ]
   }
 })

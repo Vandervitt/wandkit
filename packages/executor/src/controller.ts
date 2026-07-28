@@ -1,0 +1,105 @@
+import { capturePageWithElements, formatSnapshot, type PageSnapshot } from './snapshot'
+
+/**
+ * 页面控制器：持有「上一次快照的索引 → 真实元素」的映射，并在其上执行动作。
+ *
+ * 索引之所以要由控制器保管而不是交给模型自己算，是因为**索引只对产生它的那一次
+ * 快照有效**。页面一变，第 3 个按钮就可能已经不是原来那个了。所有动作因此都会先
+ * 校验元素是否仍在文档中，宁可报错也不能操作到错的元素上——后者会让模型基于一个
+ * 错误的成功前提继续推理下去。
+ */
+export class PageController {
+  private captured: Element[] | null = null
+
+  /** 重新读取当前页面，并刷新索引映射。 */
+  capture(root: ParentNode = document): PageSnapshot {
+    const { snapshot, elements } = capturePageWithElements(root)
+    this.captured = elements
+    return snapshot
+  }
+
+  /** 当前快照的文本形式，直接交给模型。 */
+  format(root: ParentNode = document): string {
+    return formatSnapshot(this.capture(root))
+  }
+
+  click(index: number): void {
+    const element = this.elementAt(index)
+    assertEnabled(element)
+    ;(element as HTMLElement).click()
+  }
+
+  input(index: number, text: string): void {
+    const element = this.elementAt(index)
+    assertEnabled(element)
+    if (!isTextInput(element)) {
+      throw new Error(`索引 ${index} 的元素不支持输入（${element.tagName.toLowerCase()}）`)
+    }
+    const field = element as HTMLInputElement | HTMLTextAreaElement
+    field.focus()
+    field.value = text
+    // 必须补派发事件：Vue/React 的双向绑定监听的是 input/change，直接赋值它们感知不到，
+    // 会出现「界面上有值但框架状态是空」的错位。
+    field.dispatchEvent(new Event('input', { bubbles: true }))
+    field.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+
+  select(index: number, optionText: string): void {
+    const element = this.elementAt(index)
+    assertEnabled(element)
+    if (element.tagName.toLowerCase() !== 'select') {
+      throw new Error(`索引 ${index} 的元素不是下拉框`)
+    }
+    const select = element as HTMLSelectElement
+    const options = Array.from(select.options)
+    const matched = options.find(option => option.textContent?.trim() === optionText)
+    if (!matched) {
+      const available = options.map(option => option.textContent?.trim()).join('、')
+      throw new Error(`没有名为「${optionText}」的选项。可选：${available}`)
+    }
+    select.value = matched.value
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+
+  scroll(pages = 1): void {
+    const view = typeof window === 'undefined' ? undefined : window
+    if (!view) return
+    view.scrollBy({ top: view.innerHeight * pages, behavior: 'auto' })
+  }
+
+  /**
+   * 按索引取回元素。
+   *
+   * 三道校验缺一不可：没 capture 过、越界、以及元素已脱离文档——最后一条是逐步重读
+   * 模式的核心约束，模型很容易拿着上一轮的索引继续操作。
+   */
+  private elementAt(index: number): Element {
+    if (!this.captured) {
+      throw new Error('请先 capture 当前页面，再按索引操作')
+    }
+    if (!Number.isInteger(index) || index < 0 || index >= this.captured.length) {
+      throw new Error(`索引 ${index} 越界，有效范围 0-${this.captured.length - 1}`)
+    }
+    const element = this.captured[index]
+    if (!element.isConnected) {
+      throw new Error(`索引 ${index} 指向的元素已不在当前文档中，请重新读取页面`)
+    }
+    return element
+  }
+}
+
+function isTextInput(element: Element): boolean {
+  const tag = element.tagName.toLowerCase()
+  if (tag === 'textarea') return true
+  if (tag !== 'input') return element.getAttribute('contenteditable') === 'true'
+  const type = (element as HTMLInputElement).type.toLowerCase()
+  return !['checkbox', 'radio', 'button', 'submit', 'reset', 'file'].includes(type)
+}
+
+function assertEnabled(element: Element): void {
+  const disabled = (element as HTMLInputElement).disabled === true ||
+    element.getAttribute('aria-disabled') === 'true'
+  if (disabled) {
+    throw new Error('该元素已禁用，无法操作')
+  }
+}
