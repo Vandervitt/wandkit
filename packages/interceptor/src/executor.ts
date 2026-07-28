@@ -62,7 +62,7 @@ export interface ExecutorToolOptions {
 }
 
 /**
- * 阻塞于核心包移除 `ToolRisk`，见 design.md §4.4。
+ * 阻塞于核心包移除 `ToolRisk`，见 design.md §4.5。
  *
  * 执行器工具在现有风险枚举里**无处安放**：四档都要求风险在注册时已知，而它的风险
  * 要到请求发出那一刻才判定。但正确的解法不是加一档，而是认识到 `risk` 这个自声明
@@ -72,5 +72,5 @@ export interface ExecutorToolOptions {
  * 其副作用由拦截器按真实请求逐个定级。
  */
 export function defineExecutorTool(_options: ExecutorToolOptions): ToolDefinition {
-  throw new Error('Not implemented: 阻塞于核心包移除 ToolRisk，见 design.md §4.4')
+  throw new Error('Not implemented: 阻塞于核心包移除 ToolRisk，见 design.md §4.5')
 }
