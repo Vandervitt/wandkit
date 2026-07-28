@@ -33,6 +33,7 @@ import type { ToolRegistry } from '../registry/toolRegistry'
 import type { ComposePromptOptions } from './promptComposer'
 import { ConversationStore } from './conversationStore'
 import { deepClone } from './deepClone'
+import { normalizeLlmAssistantMessage } from './llmResponseNormalizer'
 import {
   cancelledResult,
   executionFailureResult,
@@ -83,7 +84,14 @@ export interface AgentRuntimeDependencies {
   actionRouter: ActionRouter
   getRouteName(): string | undefined
   getPermissions(): string[]
-  getPageContext(moduleId: string): Promise<unknown | null>
+  /**
+   * 该模块已挂载页面的结构化快照；没有页面挂载时返回 `null`。
+   *
+   * 允许同步返回：{@link PageAdapter.getContext} 本身就可同步可异步，宿主常写成
+   * `adapters.get(moduleId, routeName)?.getContext() ?? null`，不该被迫包一层
+   * `Promise.resolve`。Runtime 一律 `await` 后再判 `null`。
+   */
+  getPageContext(moduleId: string): unknown | Promise<unknown>
   emit(event: RuntimeUiEvent): void
 }
 
@@ -148,6 +156,17 @@ interface PreparedCallOutcome {
 interface RefreshedPreparedCall {
   prepared?: PreparedAction
   result?: ToolResult
+}
+
+/**
+ * Run 终止的原因，带一个参与控制流的类别标记。
+ *
+ * `kind` 存在的意义就是让调度逻辑不必去解析 `message`：文案由宿主覆盖、可本地化，
+ * 一旦成为分支依据，翻译一句话就能静默改变执行语义。
+ */
+interface RunFailure {
+  kind: 'timeout' | 'max_rounds' | 'tool_failure' | 'run_failed'
+  message: string
 }
 
 const terminalStatuses: RunStatus[] = ['completed', 'failed', 'cancelled']
@@ -276,8 +295,12 @@ export class AgentRuntime {
    */
   async confirm(confirmationId: string): Promise<RunSnapshot> {
     const run = this.requireAwaitingRun()
-    this.endAwaiting(run)
+    // 先校验、后停表：ID 不是队首时 `approve` 会抛，此时 Run 仍在等待确认。
+    // 顺序反过来会把等待计时永久关掉（`beginAwaiting` 只在弹出下一张卡片时才重新
+    // 武装），于是一次误点就让后续的人工等待重新计入超时预算——正是 `pausedMs`
+    // 要防的那条「确认慢 → Run 超时 → 诱导重复提交」的事故链。
     const pending = this.confirmations.approve(confirmationId)
+    this.endAwaiting(run)
     this.traces.record(run.runId, {
       type: 'confirmation',
       functionName: pending.functionName,
@@ -353,8 +376,9 @@ export class AgentRuntime {
    */
   async cancel(confirmationId: string): Promise<RunSnapshot> {
     const run = this.requireAwaitingRun()
-    this.endAwaiting(run)
+    // 与 {@link confirm} 同理：先校验 ID，通过之后才停止等待计时。
     const pending = this.confirmations.reject(confirmationId)
+    this.endAwaiting(run)
     this.traces.record(run.runId, {
       type: 'confirmation',
       functionName: pending.functionName,
@@ -426,7 +450,11 @@ export class AgentRuntime {
    * 主循环：一轮模型调用 + 一批工具分派，直到终止。
    *
    * 每轮开头都重新解析候选模块并重新按权限过滤工具——上一轮的工具可能通过
-   * `activateModules` 改变了作用域，权限也可能在长会话中变化。
+   * `activateModules` 改变了作用域。
+   *
+   * 权限则相反：`run.permissions` 在 {@link start} 时快照一次，整个 Run 内冻结。
+   * 一次 Run 是一个语义整体，中途权限变动会让前后几轮基于不同的可见工具集推理，
+   * 产出前后矛盾的结果；变动会在下一个 Run 生效。
    */
   private async runLoop(run: ActiveRun): Promise<RunSnapshot> {
     try {
@@ -447,7 +475,7 @@ export class AgentRuntime {
         } else {
           this.publishState(run)
         }
-        const pageContext = await this.resolvePageContext(modules)
+        const pageContext = await this.resolvePageContext(run, modules)
         if (this.isInactive(run)) return this.toSnapshot(run)
         run.pageContext = pageContext?.value
         const messages = await this.dependencies.composePrompt({
@@ -465,9 +493,15 @@ export class AgentRuntime {
         // 模型只能用自然语言把缺什么讲清楚。用完即清，下一轮恢复正常。
         const exposedTools = run.needsUserInput ? [] : tools.map(({ schema }) => schema)
         run.needsUserInput = false
-        const assistant = await this.chatWithDeadline(
-          run,
-          applyMessageBudget(messages),
+        // 兼容那些不稳定填 tool_calls、把调用直接吐在 content 里的模型（多见于小
+        // 参数量模型）。判定口径很窄，且只认本轮真实暴露过的工具名，因此救援不会
+        // 成为绕过权限过滤的旁路，详见 normalizeLlmAssistantMessage。
+        const assistant = normalizeLlmAssistantMessage(
+          await this.chatWithDeadline(
+            run,
+            applyMessageBudget(messages),
+            exposedTools
+          ),
           exposedTools
         )
         if (this.isInactive(run)) return this.toSnapshot(run)
@@ -624,12 +658,17 @@ export class AgentRuntime {
         }
         return this.toSnapshot(run)
       }
-      if (run.timedOut) return this.fail(run, formatMessage(this.messages.runTimeout, { ms: this.runTimeoutMs }))
+      if (run.timedOut) {
+        return this.fail(run, {
+          kind: 'timeout',
+          message: formatMessage(this.messages.runTimeout, { ms: this.runTimeoutMs })
+        })
+      }
       if (error instanceof Error && error.name === 'AbortError') {
         this.historyStore.rollbackToSafePoint()
         return this.finish(run, 'cancelled', this.messages.stoppedByUser)
       }
-      return this.fail(run, this.messages.runFailed)
+      return this.fail(run, { kind: 'run_failed', message: this.messages.runFailed })
     }
   }
 
@@ -664,14 +703,27 @@ export class AgentRuntime {
       })
   }
 
-  private async resolvePageContext(modules: ModuleDefinition[]): Promise<{
+  /**
+   * 取候选模块中第一个真正拿得到页面快照的上下文。
+   *
+   * 刻意遍历而不是只看 `modules[0]`：候选优先级里「别名精确命中」排在「当前路由」
+   * 之前，因此排第一的模块经常并不是用户眼前那个页面（例如站在话单页说「查一下
+   * 用户」）。只看首位会让页面快照整个丢失，而模型恰恰要靠它把「张三」解析成 id。
+   */
+  private async resolvePageContext(
+    run: ActiveRun,
+    modules: ModuleDefinition[]
+  ): Promise<{
     moduleId: string
     value: unknown
   } | undefined> {
-    const module = modules[0]
-    if (!module) return undefined
-    const value = await this.dependencies.getPageContext(module.id)
-    return value === null ? undefined : { moduleId: module.id, value }
+    for (const module of modules) {
+      const value = await this.dependencies.getPageContext(module.id)
+      // 每个 await 之间 Run 都可能已被停止，别再去问后续模块要快照。
+      if (this.isInactive(run)) return undefined
+      if (value !== null) return { moduleId: module.id, value }
+    }
+    return undefined
   }
 
   /**
@@ -810,8 +862,10 @@ export class AgentRuntime {
   /**
    * 判断两次 prepare 的展示内容是否一致。
    *
-   * 只比 `title` / `rows` / `impact`，**不比** `payload`：这场比对针对的是「人类看到并
-   * 同意了什么」。一个没改变展示语义的内部 payload 细节，不该让用户的同意作废。
+   * 只比 `title` / `rows` / `impact` / `rawRequest`，**不比** `payload`：这场比对针对的
+   * 是「人类看到并同意了什么」。一个没改变展示语义的内部 payload 细节，不该让用户的
+   * 同意作废；而 `rawRequest` 恰恰相反——它就是点下确认后要发出去的那个请求，被偷换了
+   * 就等于拿着 A 的同意去发 B，因此必须参与比对。
    */
   private sameConfirmationContent(
     previous: PreparedAction,
@@ -820,11 +874,13 @@ export class AgentRuntime {
     return JSON.stringify({
       title: previous.title,
       rows: previous.rows,
-      impact: previous.impact
+      impact: previous.impact,
+      rawRequest: previous.rawRequest
     }) === JSON.stringify({
       title: refreshed.title,
       rows: refreshed.rows,
-      impact: refreshed.impact
+      impact: refreshed.impact,
+      rawRequest: refreshed.rawRequest
     })
   }
 
@@ -969,32 +1025,45 @@ export class AgentRuntime {
     }
   }
 
-  private limitReason(run: ActiveRun): string | undefined {
+  private limitReason(run: ActiveRun): RunFailure | undefined {
     const elapsed = this.activeElapsed(run)
-    if (elapsed > this.runTimeoutMs) return formatMessage(this.messages.runTimeout, { ms: this.runTimeoutMs })
+    if (elapsed > this.runTimeoutMs) {
+      return {
+        kind: 'timeout',
+        message: formatMessage(this.messages.runTimeout, { ms: this.runTimeoutMs })
+      }
+    }
     if (run.rounds >= this.maxRounds) {
-      return formatMessage(this.messages.maxRoundsReached, { limit: this.maxRounds })
+      return {
+        kind: 'max_rounds',
+        message: formatMessage(this.messages.maxRoundsReached, { limit: this.maxRounds })
+      }
     }
     return undefined
   }
 
-  /** 取「达到最大轮次」模板里 {limit} 之前的静态前缀，用于识别该类终止原因。 */
-  private maxRoundsPrefix(): string {
-    return this.messages.maxRoundsReached.split('{limit}')[0]
-  }
-
-  private fail(run: ActiveRun, reason: string): RunSnapshot {
+  /**
+   * 终止 Run 并记录原因。
+   *
+   * 终止**类别**由 {@link RunFailure.kind} 判定，绝不比对 `message` 文本——文案可被
+   * 宿主覆盖、可本地化，一旦参与控制流，改一句话就会静默改变执行语义（与
+   * {@link isCancelledResult}、{@link PageWaitTimeoutError} 遵循同一条原则）。
+   */
+  private fail(run: ActiveRun, failure: RunFailure): RunSnapshot {
     // 仅当最后一个 tool call 仍悬空（尚未补结果）时才追加终止结果，避免对上一轮
     // 已完成的 tool call 重复 append，导致同一 tool_call_id 出现两条 tool 消息
     // （OpenAI tool 协议非法，会污染下一个 Run 的历史）。
     if (
       run.lastToolCallId &&
-      reason.startsWith(this.maxRoundsPrefix()) &&
+      failure.kind === 'max_rounds' &&
       run.pendingToolCallIds.includes(run.lastToolCallId)
     ) {
-      this.historyStore.appendToolResult(run.lastToolCallId, { ok: false, message: reason })
+      this.historyStore.appendToolResult(
+        run.lastToolCallId,
+        { ok: false, message: failure.message }
+      )
     }
-    return this.finish(run, 'failed', reason)
+    return this.finish(run, 'failed', failure.message)
   }
 
   /**
@@ -1008,7 +1077,7 @@ export class AgentRuntime {
     skippedToolCallIds.forEach(toolCallId => {
       this.historyStore.appendToolResult(toolCallId, this.skippedAfterFailureResult)
     })
-    return this.fail(run, reason)
+    return this.fail(run, { kind: 'tool_failure', message: reason })
   }
 
   private finish(

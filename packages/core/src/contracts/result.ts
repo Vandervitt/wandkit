@@ -10,6 +10,20 @@ export interface ConfirmationRow {
 }
 
 /**
+ * 即将发出的真实请求，展示在确认卡片上。
+ *
+ * 这是卡片上唯一不可能撒谎的部分：`title` / `rows` 那几行由映射逻辑或模型产出，
+ * 都可能过时或写错，而 method + url + body 就是用户点下确认后要打到后端的东西本身。
+ *
+ * 与 `@toolairlock/ui` 的 `ConfirmCardRawRequest` 同形，可直接透传给确认卡片。
+ */
+export interface ConfirmationRawRequest {
+  method: string
+  url: string
+  body?: unknown
+}
+
+/**
  * 工具随结果一起发给已挂载页面的指令。
  *
  * Runtime 只把它当作不透明信封做路由；`type` 词表和 payload 形状都由接收方
@@ -90,9 +104,9 @@ export function isCancelledResult(result: ToolResult): boolean {
 /**
  * 渲染确认卡片所需的全部内容，外加用户批准后要交给 `execute` 的 payload。
  *
- * Runtime 会在首次准备与确认时的重跑之间比对 `title`、`rows`、`impact`——但刻意
- * **不比** `payload`。这场比对针对的是「人类看到并同意了什么」；一个没有改变展示
- * 语义的内部 payload 细节，不应该让用户的同意作废。
+ * Runtime 会在首次准备与确认时的重跑之间比对 `title`、`rows`、`impact` 与
+ * `rawRequest`——但刻意**不比** `payload`。这场比对针对的是「人类看到并同意了什么」；
+ * 一个没有改变展示语义的内部 payload 细节，不应该让用户的同意作废。
  */
 export interface PreparedAction<TPayload = unknown> {
   /** 卡片标题，如 "Delete user"。 */
@@ -103,6 +117,13 @@ export interface PreparedAction<TPayload = unknown> {
   payload: TPayload
   /** 可选的后果说明，如 "Cannot be undone"。 */
   impact?: string
+  /**
+   * 可选的原始请求，见 {@link ConfirmationRawRequest}。
+   *
+   * 与 `title` / `rows` / `impact` 一样参与确认时的重跑比对——它是展示给用户的内容，
+   * 而且是其中最不该被偷换的那部分。
+   */
+  rawRequest?: ConfirmationRawRequest
 }
 
 /**

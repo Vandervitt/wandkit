@@ -99,11 +99,14 @@ const deleteUser = defineWriteTool({
     title: '确认删除用户',
     rows: [{ label: '用户', value: await nameOf(input.id) }],
     impact: '删除后不可恢复',
+    // 可选：卡片上唯一不可能撒谎的部分，会参与确认时的重跑比对
+    rawRequest: { method: 'DELETE', url: `/api/users/${input.id}` },
     payload: { id: input.id }
   }),
-  // 只有 Runtime 在用户点下确认后才会调到这里
+  // 只有 Runtime 在用户点下确认后才会调到这里。收到的是 prepare 产出的 payload
+  // 本身（不是整个 PreparedAction），因此这里根本拿不到模型给的原始 input。
   execute: async (ctx, prepared) => {
-    await api.deleteUser(prepared.payload.id)
+    await api.deleteUser(prepared.id)
     return { ok: true, message: '已删除', writeState: 'committed' }
   }
 })
@@ -164,7 +167,7 @@ collectModuleContractIssues({ modules, tools })
 
 ## 状态
 
-`0.1.0`，从一套已在生产运行的 toB 后台 Copilot 中抽出。185 个单测覆盖调度、确认、页面协同与契约校验。
+`0.1.0`，从一套已在生产运行的 toB 后台 Copilot 中抽出。234 个单测覆盖调度、确认、页面协同与契约校验。
 
 API 在 1.0 之前可能调整。
 

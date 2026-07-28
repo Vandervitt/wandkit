@@ -33,6 +33,7 @@ export type {
   ToolResult,
   PreparedAction,
   ConfirmationRow,
+  ConfirmationRawRequest,
   UiEffect
 } from './contracts/result'
 export {

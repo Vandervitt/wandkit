@@ -1,4 +1,8 @@
-import type { ConfirmationRow, PreparedAction } from '../contracts/result'
+import type {
+  ConfirmationRawRequest,
+  ConfirmationRow,
+  PreparedAction
+} from '../contracts/result'
 import type { ToolRisk } from '../contracts/tool'
 
 /** 已准备好、正等待人工批准的写操作。Runtime 内部结构。 */
@@ -27,6 +31,8 @@ export interface ConfirmationRequest {
   title: string
   rows: ConfirmationRow[]
   impact?: string
+  /** 即将发出的真实请求，供卡片展示，见 {@link ConfirmationRawRequest}。 */
+  rawRequest?: ConfirmationRawRequest
   risk: PendingPreparedCall['risk']
 }
 
@@ -64,6 +70,7 @@ export class ConfirmationManager {
       title: item.prepared.title,
       rows: item.prepared.rows,
       impact: item.prepared.impact,
+      rawRequest: item.prepared.rawRequest,
       risk: item.risk
     }
   }

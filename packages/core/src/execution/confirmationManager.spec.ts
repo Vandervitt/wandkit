@@ -40,6 +40,22 @@ describe('ConfirmationManager', () => {
     expect(manager.current()).not.toHaveProperty('input')
   })
 
+  it('把 prepare 声明的原始请求透传给界面', () => {
+    const manager = new ConfirmationManager()
+    const item = pending('raw')
+    item.prepared.rawRequest = {
+      method: 'delete',
+      url: '/api/users/u_1',
+      body: { id: 'u_1' }
+    }
+
+    expect(manager.enqueue([item])?.rawRequest).toEqual({
+      method: 'delete',
+      url: '/api/users/u_1',
+      body: { id: 'u_1' }
+    })
+  })
+
   it('只有确认当前项后才推进到下一项', () => {
     const manager = new ConfirmationManager()
     const first = pending('one')

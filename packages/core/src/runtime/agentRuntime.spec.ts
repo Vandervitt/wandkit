@@ -486,6 +486,82 @@ describe('AgentRuntime', () => {
     expect(completed.status).toBe('completed')
   })
 
+  it('过期确认 ID 被拒绝后，人工等待仍不计入执行超时', async() => {
+    let clock = 0
+    const prepared = { title: '确认更新', rows: [], payload: { id: 7, name: 'safe' }}
+    writePrepare
+      .mockResolvedValueOnce(prepared)
+      .mockResolvedValueOnce(prepared)
+    writeExecute.mockResolvedValueOnce({ ok: true, message: '更新成功' })
+    const llm = new FakeLlm([
+      toolReply({ id: 'stale-click', name: 'gateway_update_v1', args: '{"name":"x"}' }),
+      finalReply('更新完成')
+    ])
+    const { runtime } = createRuntime(llm, {}, { now: () => clock })
+
+    const waiting = await runtime.start('更新线路')
+    expect(waiting.status).toBe('awaiting_confirmation')
+
+    // 上一个 Run 遗留的卡片 / 用户误点，回传了一个不在队首的 ID：必须被拒绝，
+    // 且不得就此把「等待确认」的计时关掉。
+    await expect(runtime.confirm('stale-id')).rejects.toThrow()
+
+    clock = 60001
+    const completed = await runtime.confirm(runtime.currentConfirmation()?.confirmationId as string)
+
+    expect(writeExecute).toHaveBeenCalledTimes(1)
+    expect(completed.status).toBe('completed')
+  })
+
+  it('过期确认 ID 被拒绝后，取消路径的人工等待同样不计入执行超时', async() => {
+    let clock = 0
+    writePrepare.mockResolvedValueOnce({ title: '确认', rows: [], payload: { id: 1 }})
+    const llm = new FakeLlm([
+      toolReply({ id: 'stale-cancel', name: 'gateway_update_v1', args: '{"name":"x"}' }),
+      finalReply('已取消')
+    ])
+    const { runtime } = createRuntime(llm, {}, { now: () => clock })
+
+    await runtime.start('更新线路')
+    await expect(runtime.cancel('stale-id')).rejects.toThrow()
+
+    clock = 60001
+    const result = await runtime.cancel(runtime.currentConfirmation()?.confirmationId as string)
+
+    expect(result.status).toBe('completed')
+  })
+
+  it('确认后重跑 prepare，原始请求变了则拒绝执行', async() => {
+    // rawRequest 是卡片上唯一不可能撒谎的部分，用户批准的就是它。
+    // 它变了却照旧执行，等于拿着 A 的同意去发 B。
+    writePrepare
+      .mockResolvedValueOnce({
+        title: '确认删除',
+        rows: [{ label: '用户', value: '张三' }],
+        payload: { id: 'u_1' },
+        rawRequest: { method: 'DELETE', url: '/api/users/u_1' }
+      })
+      .mockResolvedValueOnce({
+        title: '确认删除',
+        rows: [{ label: '用户', value: '张三' }],
+        payload: { id: 'u_9' },
+        rawRequest: { method: 'DELETE', url: '/api/users/u_9' }
+      })
+    const llm = new FakeLlm([
+      toolReply({ id: 'call-raw', name: 'gateway_update_v1', args: '{"name":"x"}' }),
+      finalReply('已终止')
+    ])
+    const { runtime, execute } = createRuntime(llm)
+    await runtime.start('删除用户')
+
+    const result = await runtime.confirm(
+      runtime.currentConfirmation()?.confirmationId as string
+    )
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(result.status).toBe('failed')
+  })
+
   it('取消写工具时写入真实取消 Tool Result 并恢复模型', async() => {
     writePrepare.mockResolvedValueOnce({ title: '确认', rows: [], payload: { id: 1 }})
     const llm = new FakeLlm([
@@ -695,6 +771,92 @@ describe('AgentRuntime', () => {
       .toEqual([
         expect.objectContaining({ toolCallId: 'call-json-again' })
       ])
+  })
+
+  it('候选首位模块没有已挂载页面时，取下一个真正拿得到上下文的模块', async() => {
+    // 候选优先级里「别名精确命中」排在「当前路由」之前，因此排第一的模块经常
+    // 并不是用户眼前那个页面。只看 modules[0] 会让页面快照整个丢失。
+    const cdrModule = {
+      id: 'cdr', title: '话单', description: '话单查询', aliases: ['话单'],
+      routes: ['Cdr-list'], permissions: [], prompt: '话单规则', examples: [],
+      formatContext: (context: { rows: number }) => `当前页 ${context.rows} 行`
+    }
+    const captured: Array<unknown> = []
+    const { runtime } = createRuntime(new FakeLlm([finalReply('好的')]), {
+      resolveCandidates: () => ['gateway', 'cdr'],
+      registry: createToolRegistry(
+        [gatewayModule, cdrModule],
+        [createTools().readTool]
+      ),
+      // gateway 页面没挂载，cdr 页面挂载着
+      getPageContext: async(moduleId: string) =>
+        moduleId === 'cdr' ? { rows: 12 } : null,
+      composePrompt: async({ pageContext, history }) => {
+        captured.push(pageContext)
+        return history as LlmMessage[]
+      }
+    })
+
+    await runtime.start('这通电话是谁打的')
+
+    expect(captured[0]).toEqual({ moduleId: 'cdr', value: { rows: 12 }})
+  })
+
+  it('候选模块都没有已挂载页面时不注入页面上下文', async() => {
+    const captured: Array<unknown> = []
+    const { runtime } = createRuntime(new FakeLlm([finalReply('好的')]), {
+      getPageContext: async() => null,
+      composePrompt: async({ pageContext, history }) => {
+        captured.push(pageContext)
+        return history as LlmMessage[]
+      }
+    })
+
+    await runtime.start('查询线路')
+
+    expect(captured[0]).toBeUndefined()
+  })
+
+  it('模型把工具调用写进 content 时按工具调用执行（小模型兼容）', async() => {
+    readExecute.mockResolvedValue({ ok: true, message: '命中 2 条' })
+    const llm = new FakeLlm([
+      // 不少小参数量模型不稳定填 tool_calls，而是把调用直接吐在文本里。
+      {
+        role: 'assistant',
+        content: '{"name":"gateway_query_v1","arguments":{"keyword":"x"}}'
+      },
+      finalReply('共 2 条')
+    ])
+    const { runtime, execute } = createRuntime(llm)
+
+    const result = await runtime.start('查询线路')
+
+    expect(execute).toHaveBeenCalledTimes(1)
+    expect(result.status).toBe('completed')
+  })
+
+  it('content 里的普通 JSON 回复不被误判成工具调用', async() => {
+    const llm = new FakeLlm([
+      { role: 'assistant', content: '{"summary":"共 2 条","page":1}' }
+    ])
+    const { runtime, execute } = createRuntime(llm)
+
+    const result = await runtime.start('查询线路')
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(result.status).toBe('completed')
+  })
+
+  it('content 里指向未暴露工具的 JSON 不被当作工具调用（防绕过权限过滤）', async() => {
+    const llm = new FakeLlm([
+      { role: 'assistant', content: '{"name":"admin_drop_db_v1","arguments":{}}' }
+    ])
+    const { runtime, execute } = createRuntime(llm)
+
+    const result = await runtime.start('查询线路')
+
+    expect(execute).not.toHaveBeenCalled()
+    expect(result.status).toBe('completed')
   })
 
   it('最多请求模型 6 轮', async() => {
