@@ -169,3 +169,40 @@ console.log('\n  >> 用户点击卡片上的【拒绝】')
 ;(shadow.querySelector('[part="reject"]') as HTMLElement).click()
 console.log(`  确认结果: ${await pending}   ← 请求不会发出`)
 console.log(`  卡片已移除: ${host.children.length === 0}`)
+
+// ── 场景七：审计闭环 ─────────────────────────────────────────────────
+line('【场景七】审计闭环 —— 每次判定都留痕，事后查得清')
+
+const { TraceCollector } = await import('../packages/core/src/index')
+const { createTraceRecorder } = await import('../packages/interceptor/src/trace')
+
+// 存储传 undefined，避免样例往真实 localStorage 里写东西
+const traces = new TraceCollector(100, undefined)
+traces.start('run-audit', 'trace-audit', '审计演示')
+
+const audited = createInterceptor({
+  policy,
+  attribution,
+  authorization: scope,
+  confirm: async () => true,
+  onVerdict: createTraceRecorder({ traces, getRunId: () => 'run-audit' })
+})
+const stopAudited = audited.install()
+
+maskArmed = true
+await fetch('/api/customers/search', { method: 'POST' })
+await fetch('/api/customers/c_7', { method: 'DELETE' })
+await runAuthorized({ scope, token: 'run-audit:c1' }, async () => {
+  await fetch('/api/customers/c_8', { method: 'PUT' })
+})
+stopAudited()
+
+console.log('  轨迹：')
+traces.recent()[0].events.forEach(event => {
+  const rule = event.names?.length ? ` [${event.names[0]}]` : ''
+  const risk = event.effectType ? ` risk=${event.effectType}` : ''
+  console.log(`    ${event.type.padEnd(26)} ${event.functionName}${rule}${risk}`)
+})
+
+console.log('\n  注意 URL 上的 query 已被剥掉——轨迹会落到本地存储，')
+console.log('  而 query 常带 token 与个人信息。请求体则完全不进轨迹。')

@@ -62,6 +62,10 @@ export type {
   ConfirmRequestHandler
 } from './interceptor'
 
+// ── 审计轨迹 ──────────────────────────────────────────────────────
+export { createTraceRecorder } from './trace'
+export type { TraceCollectorLike, TraceRecorderOptions } from './trace'
+
 // 确认卡片接线在 `@toolairlock/interceptor/confirm-ui` 子入口，刻意不从主入口
 // re-export：它 import 了 `@toolairlock/ui`，而那个包在模块顶层就 `extends
 // HTMLElement`。从主入口导出会让任何一次 import 都连带拉进 UI 包并要求 DOM——
