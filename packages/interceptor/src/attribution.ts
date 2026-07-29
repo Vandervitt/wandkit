@@ -29,9 +29,34 @@ export interface MaskAttributionOptions {
  * 因此遮罩不是装饰：关掉它，归属判定就失去依据，整个拦截方案的前提也就没了。
  */
 export function createMaskAttribution(
-  _options: MaskAttributionOptions
+  options: MaskAttributionOptions
 ): AttributionPort {
-  throw new Error('Not implemented: 阶段 3')
+  const graceMs = options.graceMs ?? DEFAULT_GRACE_MS
+  const now = options.now ?? Date.now
+  /** 最近一次观察到遮罩仍处于武装状态的时刻。 */
+  let lastArmedAt: number | null = null
+
+  return {
+    isAgentActive() {
+      let armed: boolean
+      try {
+        armed = options.isMaskArmed()
+      } catch (_error) {
+        // 归属未知时按 Agent 发起处理，走完整闸门——宿主的遮罩实现出错，不该导致
+        // 写操作被静默放行。
+        return true
+      }
+
+      if (armed) {
+        lastArmedAt = now()
+        return true
+      }
+      if (lastArmedAt === null) return false
+      // 宽限期：Agent 的操作常触发防抖保存一类的延迟请求，它们在遮罩解除之后才
+      // 真正发出。取严格小于，使 `graceMs` 成为「不再算 Agent」的那一刻。
+      return now() - lastArmedAt < graceMs
+    }
+  }
 }
 
 /**

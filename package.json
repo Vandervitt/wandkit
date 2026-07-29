@@ -16,7 +16,8 @@
     "example": "vite-node examples/01-fake-llm.ts",
     "example:llm": "vite-node examples/02-real-llm.ts",
     "example:page": "vite-node examples/03-page-executor.ts",
-    "example:chat": "vite-node examples/04-chat-standalone.ts"
+    "example:chat": "vite-node examples/04-chat-standalone.ts",
+    "example:interceptor": "vite-node examples/05-interceptor.ts"
   },
   "devDependencies": {
     "@sinclair/typebox": "^0.31.30",

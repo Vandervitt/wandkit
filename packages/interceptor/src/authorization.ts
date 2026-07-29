@@ -11,7 +11,29 @@ import type { AuthorizationScope } from './types'
  * 布尔量会被内层的 `end` 提前清掉，导致外层剩余请求重新开始弹卡片。
  */
 export function createAuthorizationScope(): AuthorizationScope {
-  throw new Error('Not implemented: 阶段 3')
+  /**
+   * 每个 token 当前的开窗次数。
+   *
+   * 按 token 计数而非只维护一个总数，是为了让 `end` 一个从未 `begin` 过的 token
+   * 成为空操作——否则一次多余的 `end` 会把别人的窗口关掉。
+   */
+  const open = new Map<string, number>()
+
+  return {
+    begin(token) {
+      open.set(token, (open.get(token) ?? 0) + 1)
+    },
+    end(token) {
+      const count = open.get(token)
+      if (count === undefined) return
+      // 减到 0 就删掉：留着 0 会让 `open.size` 永远不归零。
+      if (count <= 1) open.delete(token)
+      else open.set(token, count - 1)
+    },
+    isAuthorized() {
+      return open.size > 0
+    }
+  }
 }
 
 /**
@@ -28,8 +50,15 @@ export interface AuthorizedExecutionOptions {
 }
 
 export async function runAuthorized<T>(
-  _options: AuthorizedExecutionOptions,
-  _run: () => Promise<T>
+  options: AuthorizedExecutionOptions,
+  run: () => Promise<T>
 ): Promise<T> {
-  throw new Error('Not implemented: 阶段 3')
+  options.scope.begin(options.token)
+  try {
+    return await run()
+  } finally {
+    // 必须在 finally 里：`run` 抛异常却没关窗口，后续所有 Agent 请求都会被无条件
+    // 放行，闸门就此静默失效——而且不会有任何报错提示它已经失效了。
+    options.scope.end(options.token)
+  }
 }
