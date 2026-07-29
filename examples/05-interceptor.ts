@@ -22,13 +22,27 @@ import {
 const line = (title: string): void => console.log(`\n${'─'.repeat(64)}\n${title}\n`)
 
 // ── 模拟浏览器环境 ───────────────────────────────────────────────────
+//
+// DOM 必须在导入 UI 包**之前**注入：那个包在模块顶层就 `extends HTMLElement`，
+// 晚一步就会在导入时炸掉。
+const { JSDOM } = await import('jsdom')
+const dom = new JSDOM('<!doctype html><html><body><div id="host"></div></body></html>')
+const domScope = globalThis as Record<string, unknown>
+domScope.document = dom.window.document
+domScope.HTMLElement = dom.window.HTMLElement
+domScope.CustomEvent = dom.window.CustomEvent
+domScope.customElements = dom.window.customElements
+
 const sent: string[] = []
-const globalScope = globalThis as Record<string, unknown>
-globalScope.window = globalScope
-globalScope.fetch = async (input: unknown, init?: { method?: string }) => {
+// 拦截器 patch 的是 `window.fetch`，因此桩要装在同一个 window 上。
+domScope.window = dom.window
+const stubFetch = async (input: unknown, init?: { method?: string }) => {
   sent.push(`${init?.method ?? 'GET'} ${String(input)}`)
   return { ok: true, status: 200 }
 }
+;(dom.window as unknown as Record<string, unknown>).fetch = stubFetch
+domScope.fetch = (...args: Parameters<typeof stubFetch>) =>
+  (dom.window as unknown as { fetch: typeof stubFetch }).fetch(...args)
 
 // ── 归属判定：遮罩武装期间即 Agent 动作窗口 ──────────────────────────
 let maskArmed = false
@@ -121,3 +135,37 @@ console.log('  漏配的代价是多一次确认，而不是静默失去防护�
 
 line(`全部实际发出的请求（${sent.length} 条）`)
 sent.forEach(entry => console.log(`  ${entry}`))
+
+// ── 场景六：接 @toolairlock/ui 的真实确认卡片 ────────────────────────
+line('【场景六】接真实确认卡片 —— 判定归拦截器，问人归 ui 包')
+
+const { createConfirmCardHandler } = await import('../packages/interceptor/src/confirmUi')
+const host = dom.window.document.getElementById('host') as HTMLElement
+const cardConfirm = createConfirmCardHandler({ host })
+
+const pending = cardConfirm({
+  request: {
+    id: 'req-x', method: 'DELETE', url: '/api/customers/c_9',
+    headers: {}, body: { cascade: true }, channel: 'fetch', timestamp: 0
+  },
+  risk: 'destructive',
+  disclosure: {
+    title: '确认删除客户',
+    rows: [{ label: '客户', value: '国光科技' }],
+    impact: '关联的坐席与话术将一并删除'
+  }
+})
+await Promise.resolve()
+
+const card = host.firstElementChild as HTMLElement & { data: { confirmationId: string } }
+console.log(`  卡片元素: <${card.tagName.toLowerCase()}>   ← 来自 @toolairlock/ui`)
+const shadow = card.shadowRoot as ShadowRoot
+console.log(`  标题: ${shadow.querySelector('[part="title"]')?.textContent}`)
+console.log(`  影响: ${shadow.querySelector('[part="impact"]')?.textContent}`)
+console.log(`  原始请求区块默认展开: ${(shadow.querySelector('[part="raw"]') as HTMLDetailsElement)?.open}`)
+console.log(`  原始请求: ${shadow.querySelector('[part="raw"] pre')?.textContent?.split('\n')[0]}`)
+
+console.log('\n  >> 用户点击卡片上的【拒绝】')
+;(shadow.querySelector('[part="reject"]') as HTMLElement).click()
+console.log(`  确认结果: ${await pending}   ← 请求不会发出`)
+console.log(`  卡片已移除: ${host.children.length === 0}`)

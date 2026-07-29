@@ -22,6 +22,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./confirm-ui": {
+      "types": "./dist/confirm-ui.d.ts",
+      "import": "./dist/confirm-ui.js",
+      "require": "./dist/confirm-ui.cjs"
     }
   },
   "files": [
@@ -32,14 +37,28 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "toolairlock": "^0.1.0"
+    "toolairlock": "^0.1.0",
+    "@toolairlock/ui": "^0.1.0"
   },
   "devDependencies": {
     "toolairlock": "^0.1.0",
     "tsup": "^8.0.0",
-    "typescript": "^5.4.0"
+    "typescript": "^5.4.0",
+    "@toolairlock/ui": "^0.1.0"
   },
   "engines": {
     "node": ">=18"
+  },
+  "typesVersions": {
+    "*": {
+      "confirm-ui": [
+        "./dist/confirm-ui.d.ts"
+      ]
+    }
+  },
+  "peerDependenciesMeta": {
+    "@toolairlock/ui": {
+      "optional": true
+    }
   }
 }
