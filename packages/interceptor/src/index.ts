@@ -55,7 +55,7 @@ export { createAuthorizationScope, runAuthorized } from './authorization'
 export type { AuthorizedExecutionOptions } from './authorization'
 
 // ── 拦截器 ────────────────────────────────────────────────────────
-export { createInterceptor } from './interceptor'
+export { createInterceptor, RequestDeniedError } from './interceptor'
 export type {
   Interceptor,
   InterceptorOptions,

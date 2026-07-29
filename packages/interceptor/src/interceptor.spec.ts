@@ -1,0 +1,274 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createInterceptor, RequestDeniedError } from './interceptor'
+import { createStaticAttribution } from './attribution'
+import type { ConfirmRequestHandler, Interceptor, InterceptorOptions } from './interceptor'
+import type { InterceptionPolicy } from './types'
+
+const originalFetch = window.fetch
+let interceptor: Interceptor | undefined
+let uninstall: (() => void) | undefined
+
+/** 记录实际打到「网络」上的请求——被拦下的不该出现在这里。 */
+let sent: Array<{ method: string, url: string }>
+
+function setup(
+  overrides: Partial<InterceptorOptions> = {},
+  policy: InterceptionPolicy = {}
+) {
+  const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+    async () => true
+  )
+  interceptor = createInterceptor({
+    policy,
+    attribution: createStaticAttribution(true),
+    confirm,
+    ...overrides
+  })
+  uninstall = interceptor.install()
+  return { confirm }
+}
+
+beforeEach(() => {
+  sent = []
+  window.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : String(input)
+    sent.push({ method: init?.method ?? 'GET', url })
+    return new Response('{}', { status: 200 })
+  }) as typeof fetch
+})
+
+afterEach(() => {
+  uninstall?.()
+  uninstall = undefined
+  interceptor = undefined
+  window.fetch = originalFetch
+})
+
+describe('fetch —— 放行路径', () => {
+  it('安全方法直接透传，不打扰用户', async () => {
+    const { confirm } = setup()
+
+    await fetch('/api/users')
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(sent).toEqual([{ method: 'GET', url: '/api/users' }])
+  })
+
+  it('非 Agent 发起的写请求不拦——用户自己点的不归闸门管', async () => {
+    const { confirm } = setup({ attribution: createStaticAttribution(false) })
+
+    await fetch('/api/users/u_1', { method: 'DELETE' })
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(sent).toHaveLength(1)
+  })
+
+  it('命中放行名单的写请求直接透传', async () => {
+    const { confirm } = setup({}, {
+      allow: [{ id: 'search', match: { method: 'POST', url: '/api/*/search' } }]
+    })
+
+    await fetch('/api/users/search', { method: 'POST' })
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(sent).toHaveLength(1)
+  })
+})
+
+describe('fetch —— 确认路径', () => {
+  it('默认拒绝：未命中名单的写请求要确认', async () => {
+    const { confirm } = setup()
+
+    await fetch('/api/users/u_1', { method: 'DELETE' })
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(confirm.mock.calls[0][0]).toMatchObject({
+      risk: 'write',
+      request: { method: 'DELETE', url: expect.stringContaining('/api/users/u_1') }
+    })
+  })
+
+  it('批准后才真正发出——顺序不能反', async () => {
+    setup()
+
+    await fetch('/api/users/u_1', { method: 'DELETE' })
+
+    expect(sent).toEqual([{ method: 'DELETE', url: '/api/users/u_1' }])
+  })
+
+  it('拒绝时请求根本不发出', async () => {
+    const confirm = vi.fn(async () => false)
+    setup({ confirm })
+
+    await expect(fetch('/api/users/u_1', { method: 'DELETE' })).rejects.toThrow()
+    expect(sent).toHaveLength(0)
+  })
+
+  it('拒绝抛出可分辨的错误，而不是静默丢弃', async () => {
+    // 调用方需要能区分「被用户拒了」和「网络挂了」——这与核心包用 cancelled 标记
+    // 而非文案判定取消是同一条原则。
+    setup({ confirm: vi.fn(async () => false) })
+
+    await expect(fetch('/api/x', { method: 'POST' }))
+      .rejects.toBeInstanceOf(RequestDeniedError)
+  })
+
+  it('危险名单升级为 destructive', async () => {
+    const { confirm } = setup({}, {
+      danger: [{ id: 'del-user', match: { method: 'DELETE', url: '/api/users/:id' } }]
+    })
+
+    await fetch('/api/users/u_1', { method: 'DELETE' })
+
+    expect(confirm.mock.calls[0][0].risk).toBe('destructive')
+  })
+
+  it('已授权窗口内不重复确认——路径 A 已经问过人了', async () => {
+    const scope = { begin: vi.fn(), end: vi.fn(), isAuthorized: () => true }
+    const { confirm } = setup({ authorization: scope })
+
+    await fetch('/api/users/u_1', { method: 'DELETE' })
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(sent).toHaveLength(1)
+  })
+})
+
+describe('fetch —— 请求解析', () => {
+  it('解析 JSON 请求体供规则判定', async () => {
+    const seen: unknown[] = []
+    setup({}, {
+      danger: [{
+        id: 'forced', match: { when: request => { seen.push(request.body); return false } }
+      }]
+    })
+
+    await fetch('/api/x', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ force: true })
+    })
+
+    expect(seen[0]).toEqual({ force: true })
+  })
+
+  it('非 JSON 请求体保持原样，不因解析失败而中断', async () => {
+    const seen: unknown[] = []
+    setup({}, {
+      danger: [{ id: 'x', match: { when: r => { seen.push(r.body); return false } } }]
+    })
+
+    await fetch('/api/x', { method: 'POST', body: 'name=zhangsan' })
+
+    expect(seen[0]).toBe('name=zhangsan')
+  })
+
+  it('Request 对象形态同样能解析出方法与 URL', async () => {
+    const { confirm } = setup()
+
+    await fetch(new Request('https://app.test/api/users/u_1', { method: 'DELETE' }))
+
+    expect(confirm.mock.calls[0][0].request).toMatchObject({
+      method: 'DELETE',
+      url: expect.stringContaining('/api/users/u_1')
+    })
+  })
+})
+
+describe('透传与生命周期', () => {
+  it('保留原始 fetch 的返回值', async () => {
+    setup()
+
+    const response = await fetch('/api/users')
+
+    expect(response.status).toBe(200)
+  })
+
+  it('原始 fetch 抛错时原样抛出，不吞掉', async () => {
+    window.fetch = vi.fn(async () => { throw new TypeError('Failed to fetch') }) as typeof fetch
+    setup()
+
+    await expect(fetch('/api/users')).rejects.toThrow('Failed to fetch')
+  })
+
+  it('卸载后完全还原', () => {
+    const before = window.fetch
+    setup()
+    expect(window.fetch).not.toBe(before)
+
+    uninstall?.()
+    uninstall = undefined
+
+    expect(window.fetch).toBe(before)
+  })
+
+  it('重复安装是幂等的，不叠加多层 patch', async () => {
+    const { confirm } = setup()
+    const second = interceptor?.install()
+
+    await fetch('/api/x', { method: 'POST' })
+    second?.()
+
+    // 叠了两层的话会判定两次
+    expect(confirm).toHaveBeenCalledTimes(1)
+  })
+
+  it('installed 反映当前状态', () => {
+    setup()
+    expect(interceptor?.installed).toBe(true)
+
+    uninstall?.()
+    uninstall = undefined
+
+    expect(interceptor?.installed).toBe(false)
+  })
+})
+
+describe('闸门自身出错时从严', () => {
+  it('confirm 回调抛错按拒绝处理——问不出结果不等于放行', async () => {
+    setup({ confirm: vi.fn(async () => { throw new Error('弹窗挂了') }) })
+
+    await expect(fetch('/api/x', { method: 'POST' })).rejects.toBeInstanceOf(RequestDeniedError)
+    expect(sent).toHaveLength(0)
+  })
+
+  it('归属判定抛错时按 Agent 发起处理，走完整闸门', async () => {
+    const { confirm } = setup({
+      attribution: { isAgentActive: () => { throw new Error('遮罩状态未知') } }
+    })
+
+    await fetch('/api/x', { method: 'POST' })
+
+    expect(confirm).toHaveBeenCalled()
+  })
+})
+
+describe('判定回调', () => {
+  it('每次判定都上报，供宿主写入 trace', async () => {
+    const onVerdict = vi.fn()
+    setup({ onVerdict })
+
+    await fetch('/api/users')
+    await fetch('/api/x', { method: 'POST' })
+
+    expect(onVerdict).toHaveBeenCalledTimes(2)
+    expect(onVerdict.mock.calls[0][1]).toMatchObject({ action: 'allow' })
+    expect(onVerdict.mock.calls[1][1]).toMatchObject({ action: 'confirm' })
+  })
+
+  it('describe 产出的披露信息传给确认回调', async () => {
+    const { confirm } = setup({}, {
+      danger: [{
+        id: 'del',
+        match: { method: 'DELETE' },
+        describe: async () => ({
+          title: '删除用户', rows: [{ label: '用户', value: '张三' }], impact: '不可恢复'
+        })
+      }]
+    })
+
+    await fetch('/api/users/u_1', { method: 'DELETE' })
+
+    expect(confirm.mock.calls[0][0].disclosure).toMatchObject({ title: '删除用户' })
+  })
+})

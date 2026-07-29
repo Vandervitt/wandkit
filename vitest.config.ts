@@ -9,7 +9,8 @@ export default defineConfig({
       // UI 包是 Web Components，需要 DOM
       ['packages/ui/**', 'jsdom'],
       ['packages/executor/**', 'jsdom'],
-      ['packages/chat/**', 'jsdom']
+      ['packages/chat/**', 'jsdom'],
+      ['packages/interceptor/**', 'jsdom']
     ]
   }
 })
