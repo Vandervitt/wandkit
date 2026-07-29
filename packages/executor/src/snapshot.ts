@@ -303,7 +303,10 @@ export function capturePageWithElements(
     //
     // 语义控件（input/textarea/button 等）豁免：一个没有 label 的输入框仍然是可以
     // 填写的，模型能靠位置和上下文推断它的用途；装饰性 div 则不然。
-    if (!name && !attributes && !element.matches(SEMANTIC_LEAF_SELECTOR)) return
+    // `scrollable` 同样豁免：它天然无名无属性（见上一条豁免的理由），而 `name` 字段
+    // 已在上面填了方向名，这里查的 `name` 仍是空串。
+    if (!name && !attributes && role !== 'scrollable' &&
+      !element.matches(SEMANTIC_LEAF_SELECTOR)) return
     const context = rowContext(element, name)
     if (context) snapshot.context = context
     snapshotElements.push(snapshot)
@@ -375,6 +378,8 @@ function isInViewport(
 function isTopElement(element: Element, cache: MeasureCache): boolean {
   const doc = element.ownerDocument
   const root = element.getRootNode() as Document | ShadowRoot
+  const fromPoints = (root as Document).elementsFromPoint?.bind(root) ??
+    doc.elementsFromPoint?.bind(doc)
   const fromPoint = (root as Document).elementFromPoint?.bind(root) ??
     doc.elementFromPoint.bind(doc)
   const rect = cache.rect(element)
@@ -388,9 +393,23 @@ function isTopElement(element: Element, cache: MeasureCache): boolean {
   ]
 
   return points.some(([x, y]) => {
+    // 先试单点：绝大多数元素本来就在栈顶，这条几乎总是命中，代价也最低。
     const hit = fromPoint(x, y)
-    if (!hit) return false
-    return hit === element || element.contains(hit) || hit.contains(element)
+    if (hit && (hit === element || element.contains(hit) || hit.contains(element))) {
+      return true
+    }
+    if (!fromPoints) return false
+
+    // 单点没命中时才取**整个命中栈**：同一个点上常有多层重叠，而它们往往都是用户
+    // 点得到的。真实后台实测——Element UI 开启固定列会把整行 DOM 复制一份，主表格
+    // 那份被固定列容器完全盖住，栈顶是副本层的别的按钮，只看栈顶会把整列操作按钮
+    // 判成不可见。
+    //
+    // 「元素是否出现在栈中」既保住了本职（弹窗遮罩下的元素根本不在栈里），又不再
+    // 误伤同位置重叠。放在单点之后是因为它明显更贵——真实页面实测，无条件调用会把
+    // 整体耗时从 21ms 拉到 167ms。
+    return fromPoints(x, y).some(stacked =>
+      stacked === element || element.contains(stacked) || stacked.contains(element))
   })
 }
 
