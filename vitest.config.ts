@@ -8,7 +8,8 @@ export default defineConfig({
     environmentMatchGlobs: [
       // UI 包是 Web Components，需要 DOM
       ['packages/ui/**', 'jsdom'],
-      ['packages/executor/**', 'jsdom']
+      ['packages/executor/**', 'jsdom'],
+      ['packages/chat/**', 'jsdom']
     ]
   }
 })

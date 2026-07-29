@@ -15,7 +15,8 @@
     "verify": "npm run test && npm run typecheck && npm run build",
     "example": "vite-node examples/01-fake-llm.ts",
     "example:llm": "vite-node examples/02-real-llm.ts",
-    "example:page": "vite-node examples/03-page-executor.ts"
+    "example:page": "vite-node examples/03-page-executor.ts",
+    "example:chat": "vite-node examples/04-chat-standalone.ts"
   },
   "devDependencies": {
     "@sinclair/typebox": "^0.31.30",
