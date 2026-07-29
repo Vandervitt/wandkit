@@ -53,6 +53,52 @@ describe('运行时事件 → 会话状态', () => {
     expect(session.state.entries).toHaveLength(0)
   })
 
+  it('导出的历史里 tool 消息必须有发起它的 assistant 调用', () => {
+    // 真实页面实测的缺陷：运行时在工具调用轮次传 content: null，桥接层据此跳过，
+    // 结果那一轮的 tool_calls 也一起丢了。导出的历史里 tool 消息成了孤儿——
+    // 这在 OpenAI 协议下非法，厂商会拒绝整条会话。
+    const { runtime, onEvent } = createRuntime()
+    connectRuntime(session, runtime, { onEvent })
+
+    runtime.emit({
+      type: 'assistant',
+      content: null,
+      toolCalls: [{
+        id: 'c1', type: 'function',
+        function: { name: 'page_read_v1', arguments: '{}' }
+      }]
+    })
+    runtime.emit({
+      type: 'tool_result',
+      toolCallId: 'c1',
+      result: { ok: true, message: '已读取' }
+    })
+
+    const messages = session.toMessages()
+    expect(messages[0]).toMatchObject({
+      role: 'assistant',
+      tool_calls: [{ id: 'c1' }]
+    })
+    expect(messages[1]).toMatchObject({ role: 'tool', tool_call_id: 'c1' })
+  })
+
+  it('带工具调用的轮次不产生空气泡，但工具名可见', () => {
+    const { runtime, onEvent } = createRuntime()
+    connectRuntime(session, runtime, { onEvent })
+
+    runtime.emit({
+      type: 'assistant',
+      content: null,
+      toolCalls: [{
+        id: 'c1', type: 'function', function: { name: 'page_read_v1', arguments: '{}' }
+      }]
+    })
+
+    const entry = session.state.entries[0]
+    expect(entry.content).toBe('')
+    expect(entry.toolCalls?.[0].function.name).toBe('page_read_v1')
+  })
+
   it('tool_result 事件带上成败标记', () => {
     const { runtime, onEvent } = createRuntime()
     connectRuntime(session, runtime, { onEvent })

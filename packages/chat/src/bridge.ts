@@ -1,4 +1,4 @@
-import type { ChatConfirmation } from './protocol'
+import type { ChatConfirmation, ChatToolCall } from './protocol'
 import type { ChatSession } from './session'
 
 /**
@@ -14,6 +14,14 @@ export interface RuntimeUiEventLike {
   type: 'state' | 'assistant' | 'confirmation' | 'tool_result' | 'clear'
   snapshot?: { runId: string, traceId: string, status: string }
   content?: string | null
+  /**
+   * 本轮 assistant 发起的工具调用。
+   *
+   * 核心当前的 `RuntimeUiEvent` 没有这个字段，宿主需在 `emit` 里从模型响应带上。
+   * **不带的话导出的历史是非法的**：`tool` 消息会变成没有发起者的孤儿，而 OpenAI
+   * 协议要求每条 tool 消息都由某个 `tool_calls` 发起，厂商会拒绝整条会话。
+   */
+  toolCalls?: ChatToolCall[]
   confirmation?: ChatConfirmation
   toolCallId?: string
   result?: { ok: boolean, message: string }
@@ -70,8 +78,16 @@ export function connectRuntime(
     if (disposed) return
     switch (event.type) {
       case 'assistant':
-        // 有工具调用的轮次 content 为 null，那通常是思维链，不该展示。
-        if (event.content) session.append({ role: 'assistant', content: event.content })
+        // content 为 null 且无工具调用时才整条跳过——那是纯思维链，不该展示。
+        // 但只要带了 tool_calls 就必须落成消息：否则随后的 tool 结果会变成没有
+        // 发起者的孤儿，导出的历史在 OpenAI 协议下非法。
+        if (event.content || event.toolCalls?.length) {
+          session.append({
+            role: 'assistant',
+            content: event.content ?? null,
+            ...(event.toolCalls?.length ? { tool_calls: event.toolCalls } : {})
+          })
+        }
         break
       case 'tool_result':
         if (event.toolCallId && event.result) {

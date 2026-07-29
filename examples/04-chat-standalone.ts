@@ -110,11 +110,27 @@ function toolCall(id: string, name: string, args: unknown): LlmAssistantMessage 
 const adapters = new PageAdapterRegistry()
 const handlers: Array<(event: RuntimeUiEventLike) => void> = []
 
+/**
+ * 记住模型最近一轮发起的工具调用。
+ *
+ * 核心的 `RuntimeUiEvent` 不带 `tool_calls`，宿主需要自己从模型响应里捕获再补给
+ * 桥接层——否则导出的历史里 tool 消息没有发起者，OpenAI 协议下非法。
+ */
+let lastToolCalls: Array<{ id: string, type: 'function', function: { name: string, arguments: string } }> | undefined
+const scripted = new FakeLlm([
+  toolCall('c1', 'user_delete_v1', { id: 'u_1' }),
+  { role: 'assistant', content: '已删除张三。' }
+])
+const llm = {
+  async chat(...args: Parameters<FakeLlm['chat']>) {
+    const reply = await scripted.chat(...args)
+    lastToolCalls = reply.tool_calls
+    return reply
+  }
+}
+
 const runtime = new AgentRuntime({
-  llm: new FakeLlm([
-    toolCall('c1', 'user_delete_v1', { id: 'u_1' }),
-    { role: 'assistant', content: '已删除张三。' }
-  ]),
+  llm,
   registry: createToolRegistry([userModule], [queryUsers, deleteUser]),
   resolveCandidates,
   composePrompt: composePromptMessages,
@@ -129,8 +145,17 @@ const runtime = new AgentRuntime({
   getRouteName: () => 'UserList',
   getPermissions: () => [],
   getPageContext: () => null,
-  // 运行时的事件出口就是这个 emit，桥接层从这里接管
-  emit: event => handlers.forEach(handler => handler(event as RuntimeUiEventLike))
+  // 运行时的事件出口就是这个 emit，桥接层从这里接管。
+  //
+  // assistant 事件要补上本轮的 tool_calls：核心的 RuntimeUiEvent 不带这个字段，
+  // 而缺了它，随后的 tool 结果在导出历史里会成为没有发起者的孤儿——OpenAI 协议
+  // 要求每条 tool 消息都由某个 tool_calls 发起。
+  emit: event => {
+    const enriched = event.type === 'assistant'
+      ? { ...event, toolCalls: lastToolCalls }
+      : event
+    handlers.forEach(handler => handler(enriched as RuntimeUiEventLike))
+  }
 }, { traces: undefined as never })
 
 const session = new ChatSession()

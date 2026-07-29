@@ -71,6 +71,38 @@ await controls.approve(session.state.confirmation.confirmationId)
 `onEvent` 要由宿主传进来，是因为 `AgentRuntime` 的事件出口是构造时注入的 `emit`
 回调，运行时本身没有订阅接口。
 
+### assistant 事件要补上 tool_calls
+
+核心的 `RuntimeUiEvent` **不带** `tool_calls`。缺了它，随后的 tool 结果在导出历史里
+会成为没有发起者的孤儿——OpenAI 协议要求每条 `tool` 消息都由某个 `tool_calls` 发起，
+厂商会拒绝整条会话。
+
+宿主从模型响应里捕获后补给桥接层：
+
+```ts
+let lastToolCalls
+const llm = {
+  async chat(...args) {
+    const reply = await backend.chat(...args)
+    lastToolCalls = reply.tool_calls
+    return reply
+  }
+}
+
+const runtime = new AgentRuntime({
+  llm,
+  // …
+  emit: event => {
+    const enriched = event.type === 'assistant'
+      ? { ...event, toolCalls: lastToolCalls }
+      : event
+    handlers.forEach(handler => handler(enriched))
+  }
+})
+```
+
+顺带的好处是界面能显示「Agent 正在调用哪个工具」。
+
 **过期确认 ID 不会打到运行时上**：上一个 Run 遗留在屏幕上的卡片回传的是已不当前的
 ID，放行它等于用旧的同意批准当前这次写入。
 
