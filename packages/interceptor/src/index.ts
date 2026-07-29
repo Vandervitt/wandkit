@@ -67,10 +67,5 @@ export type {
 // HTMLElement`。从主入口导出会让任何一次 import 都连带拉进 UI 包并要求 DOM——
 // 拦截器要能在没有界面的场景下单独使用，这条不能破。
 
-// ── 自由执行器 ────────────────────────────────────────────────────
-export { defineExecutorTool } from './executor'
-export type {
-  ExecutorPort,
-  ExecutorResult,
-  ExecutorToolOptions
-} from './executor'
+// 自由执行器（ExecutorPort）已否决：能力去声明化由 `@toolairlock/executor` 的
+// 通用 DOM 原语达成，见 docs/feat_20260728_请求拦截治理/design.md §4.2。

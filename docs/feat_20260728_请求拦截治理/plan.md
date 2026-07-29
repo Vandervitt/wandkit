@@ -11,8 +11,8 @@
 | 2 | fetch / XHR / beacon 拦截 | 挂起—放行—拒绝三条链路可跑 | ✅ 完成（32 单测） |
 | 3 | 归属判定 + 已授权窗口 | 用户操作不弹卡；路径 A 不双重确认 | ✅ 完成（20 单测） |
 | 4 | 与 ui 包接线 + 可运行样例 | `examples/05-interceptor.ts` | ✅ 完成（12 单测） |
-| 5 | ExecutorPort + page-agent 适配器 | 端到端：自由操作被闸门拦下 | 待办 |
-| 6 | trace 接入 + README 定位改写 | 审计闭环，文档与实现一致 | 待办 |
+| ~~5~~ | ~~ExecutorPort + page-agent 适配器~~ | — | ❌ 已否决，见 design §4.1 |
+| 5 | trace 接入 + README 定位改写 | 审计闭环，文档与实现一致 | 待办 |
 
 ## 关于能力发现
 
@@ -209,3 +209,20 @@ Agent 的操作常触发防抖保存一类的延迟请求，它们在遮罩解�
 >> 用户点击卡片上的【拒绝】
 确认结果: false   ← 请求不会发出
 ```
+
+
+## 阶段 5（原 ExecutorPort）已否决
+
+原计划接一个窄端口 + page-agent 适配器，让 Agent 能做没声明过的事。
+
+**否决理由**：该端口的签名（一句话进、结果出）是为「整包接入自带 Agent 循环的执行器」
+设计的，而那与 `AgentRuntime` 已有的循环会叠成两层——轮次上限、`maxToolCalls`、trace、
+超时预算全部失效。这条在 dom-capture.md §7 就已明确不采纳，端口设计与它自相矛盾。
+
+**目标已由 `@toolairlock/executor` 达成**：5 个通用 DOM 原语（read / click / input /
+select / scroll），循环仍在 `AgentRuntime` 手里，每一步都过工具调用，因此轮次上限、
+trace、闸门全部生效。已在真实后台跑通。
+
+连带解除的阻塞：`defineExecutorTool` 此前因核心包 `ToolRisk` 放不下「无法预判风险的
+工具」而卡住（design §4.6），骨架删除后该阻塞消失——原语是普通 `read` 工具，其副作用
+由请求层拦截逐个定级。
