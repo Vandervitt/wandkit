@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  stopRequestTracking,
   waitForDomStable,
   watchRouteChanges,
   type RouteWatcher
@@ -98,6 +99,52 @@ describe('waitForDomStable', () => {
     expect(stable).toBe(true)
     // 变更持续了 ~120ms，加上 50ms 静默期，不可能在 100ms 内返回
     expect(Date.now() - start).toBeGreaterThanOrEqual(100)
+  })
+
+  it('请求在途时不判稳定——静默不等于稳定', async () => {
+    // 真实应用实测的 bug：点击查询后表格先清空（一次 DOM 变更），随后在等待 API
+    // 响应的几百毫秒里 DOM 完全静止，静默期被满足，于是抓到一个空表格。
+    // 实测 captureStable 仅 329ms 就返回 0 行，再等 1500ms 是 8 行。
+    let resolveRequest: (value: Response) => void = () => undefined
+    const inflight = new Promise<Response>(resolve => { resolveRequest = resolve })
+    const originalFetch = window.fetch
+    // 先卸掉可能残留的 tracker，再换上受控 fetch，最后由 waitForDomStable 安装
+    // tracker——顺序反了会把 tracker 装到旧 fetch 上。
+    stopRequestTracking()
+    window.fetch = (() => inflight) as typeof fetch
+
+    let settled = false
+    const waiting = waitForDomStable({ quietMs: 50, timeoutMs: 3000 })
+      .then(stable => { settled = true; return stable })
+
+    // tracker 已安装，此时发起的请求才会被计数
+    void window.fetch('/api/list')
+    document.body.appendChild(document.createElement('div'))
+
+    // 静默期早已过去，但请求还在途，不得判稳定
+    await new Promise(r => setTimeout(r, 250))
+    expect(settled).toBe(false)
+
+    resolveRequest(new Response('[]'))
+    await expect(waiting).resolves.toBe(true)
+
+    stopRequestTracking()
+    window.fetch = originalFetch
+  })
+
+  it('关闭 trackRequests 后退回纯 DOM 静默判据', async () => {
+    const originalFetch = window.fetch
+    stopRequestTracking()
+    window.fetch = (() => new Promise<Response>(() => undefined)) as typeof fetch
+    void window.fetch('/api/never')
+
+    // 不跟踪请求时，DOM 静默即判稳定
+    await expect(
+      waitForDomStable({ quietMs: 30, timeoutMs: 1000, trackRequests: false })
+    ).resolves.toBe(true)
+
+    stopRequestTracking()
+    window.fetch = originalFetch
   })
 
   it('DOM 永不静止时超时返回 false，而不是抛错或卡死', async () => {

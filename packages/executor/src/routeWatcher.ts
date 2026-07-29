@@ -101,6 +101,94 @@ export interface WaitForStableOptions {
   timeoutMs?: number
   /** 观察范围，缺省 `document`。 */
   root?: Node
+  /**
+   * 是否把「有请求在途」也算作未稳定，缺省开启。
+   *
+   * **静默不等于稳定。** 真实页面实测：点击查询后表格先清空（一次 DOM 变更），随后
+   * 在等待 API 响应的几百毫秒里 DOM 完全静止——静默期于是在数据回来之前就被满足，
+   * 抓到一个空表格。实测该场景下 `captureStable` 仅耗时 329ms 就返回 0 行，而再等
+   * 1500ms 后是 8 行。
+   *
+   * 因此必须把在途请求纳入判据：DOM 不动**且**没有请求在等，才算真的稳定。
+   */
+  trackRequests?: boolean
+}
+
+/**
+ * 在途请求计数。
+ *
+ * 只做计数、不改写任何请求内容，因此与 `@toolairlock/interceptor` 的治理职责正交，
+ * 两者可以同时安装。
+ */
+interface RequestTracker {
+  readonly pending: number
+  subscribe(listener: () => void): () => void
+  stop(): void
+}
+
+let sharedTracker: RequestTracker | undefined
+
+/**
+ * 安装（或复用）全局在途请求计数器。
+ *
+ * 做成共享单例：每次 `waitForDomStable` 都 patch 一遍 `fetch` 会叠出多层包装，
+ * 且卸载顺序一旦交错就会把别人的包装抹掉。
+ */
+function ensureRequestTracker(): RequestTracker | undefined {
+  if (sharedTracker) return sharedTracker
+  const view = typeof window === 'undefined' ? undefined : window
+  if (!view) return undefined
+
+  let pending = 0
+  const listeners = new Set<() => void>()
+  const notify = (): void => listeners.forEach(listener => listener())
+  const settle = (): void => {
+    pending = Math.max(0, pending - 1)
+    notify()
+  }
+
+  const originalFetch = view.fetch
+  if (typeof originalFetch === 'function') {
+    view.fetch = function patchedFetch(...args: Parameters<typeof fetch>) {
+      pending += 1
+      notify()
+      return originalFetch.apply(this, args).finally(settle)
+    }
+  }
+
+  const XHR = view.XMLHttpRequest
+  const originalSend = XHR?.prototype.send
+  if (originalSend) {
+    XHR.prototype.send = function patchedSend(
+      ...args: Parameters<XMLHttpRequest['send']>
+    ) {
+      pending += 1
+      notify()
+      // `loadend` 覆盖成功、失败与中止三种终态，比监听 `load` 可靠。
+      this.addEventListener('loadend', settle, { once: true })
+      return originalSend.apply(this, args)
+    }
+  }
+
+  sharedTracker = {
+    get pending() { return pending },
+    subscribe(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+    stop() {
+      if (typeof originalFetch === 'function') view.fetch = originalFetch
+      if (originalSend && XHR) XHR.prototype.send = originalSend
+      listeners.clear()
+      sharedTracker = undefined
+    }
+  }
+  return sharedTracker
+}
+
+/** 卸载在途请求计数器。测试与页面卸载时调用。 */
+export function stopRequestTracking(): void {
+  sharedTracker?.stop()
 }
 
 /**
@@ -123,9 +211,12 @@ export function waitForDomStable(
   const root = options.root ?? (typeof document === 'undefined' ? undefined : document)
   if (!root || typeof MutationObserver === 'undefined') return Promise.resolve(true)
 
+  const tracker = options.trackRequests === false ? undefined : ensureRequestTracker()
+
   return new Promise<boolean>(resolve => {
     let quietTimer: ReturnType<typeof setTimeout> | undefined
     let settled = false
+    let unsubscribe: (() => void) | undefined
 
     const finish = (stable: boolean): void => {
       if (settled) return
@@ -133,16 +224,33 @@ export function waitForDomStable(
       if (quietTimer) clearTimeout(quietTimer)
       clearTimeout(deadline)
       observer.disconnect()
+      unsubscribe?.()
       resolve(stable)
+    }
+
+    /**
+     * 静默期满时才真正判定。
+     *
+     * 有请求在途时**不算稳定**——DOM 之所以不动，往往正是因为在等响应。此时重置
+     * 计时器继续等，等到请求落地引发新的 DOM 变更，再走一轮静默。
+     */
+    const onQuietElapsed = (): void => {
+      if (tracker && tracker.pending > 0) {
+        restartQuietTimer()
+        return
+      }
+      finish(true)
     }
 
     const restartQuietTimer = (): void => {
       if (quietTimer) clearTimeout(quietTimer)
-      quietTimer = setTimeout(() => finish(true), quietMs)
+      quietTimer = setTimeout(onQuietElapsed, quietMs)
     }
 
     const observer = new MutationObserver(restartQuietTimer)
     const deadline = setTimeout(() => finish(false), timeoutMs)
+    // 请求落地也重置静默期：响应到达与 DOM 更新之间还隔着一次渲染。
+    if (tracker) unsubscribe = tracker.subscribe(restartQuietTimer)
 
     observer.observe(root, {
       subtree: true,
