@@ -135,7 +135,22 @@ export class PageController {
     select.dispatchEvent(new Event('change', { bubbles: true }))
   }
 
-  scroll(pages = 1): void {
+  /**
+   * 滚动页面，或滚动某个内部容器。
+   *
+   * 给了 `index` 就滚那个容器——快照里标为 `scrollable` 的元素页面级滚动够不到，
+   * 不单独支持的话它下半截的内容对 Agent 永远不存在。
+   *
+   * @param pages 滚动几屏，负数向上。
+   * @param index 目标容器在最近一次快照中的索引；缺省滚动整个页面。
+   */
+  scroll(pages = 1, index?: number): void {
+    if (index !== undefined) {
+      const element = this.elementAt(index)
+      const box = element as HTMLElement
+      box.scrollBy({ top: box.clientHeight * pages, behavior: 'auto' })
+      return
+    }
     const view = typeof window === 'undefined' ? undefined : window
     if (!view) return
     view.scrollBy({ top: view.innerHeight * pages, behavior: 'auto' })

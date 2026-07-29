@@ -87,7 +87,9 @@ const INTERACTIVE_ROLES = new Set([
   'button', 'link', 'textbox', 'searchbox', 'combobox', 'spinbutton',
   'checkbox', 'radio', 'switch', 'slider',
   'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
-  'option', 'treeitem', 'gridcell'
+  'option', 'treeitem', 'gridcell',
+  // 本包自造：内部滚动容器。它不是 ARIA role，但模型需要知道「这里还能往下翻」。
+  'scrollable'
 ])
 
 /** 原生就可交互的**叶子**标签。它们的内部结构只是装饰，不该单独成项。 */
@@ -116,6 +118,43 @@ const CANDIDATE_SELECTOR = [
  * 存活的信息」这条原则，且换个 UI 库就失效。
  */
 const CLICKABLE_CURSOR = 'pointer'
+
+/**
+ * 表示「可直接操作」的指针样式。
+ *
+ * 除 `pointer` 外还认拖拽类：拖动排序把手是 `move`，可拖拽面板是 `grab`/`grabbing`。
+ * 它们同样是渲染出来的交互承诺——用户看到这个光标就知道这里能动。
+ *
+ * **刻意不含 `text`。** page-agent 把它算进去了，但普通段落大量使用 `cursor: text`，
+ * 收进来会让整页文字涌入快照。可编辑区域另有 `contenteditable` 与 `<textarea>` 兜住，
+ * 不必靠光标推断。
+ */
+const INTERACTIVE_CURSORS = new Set([CLICKABLE_CURSOR, 'move', 'grab', 'grabbing'])
+
+/**
+ * 内联事件属性。
+ *
+ * 老后台大量存在 `<div onclick="doSomething()">` 且不给指针样式的写法——不认它就
+ * 整块功能对 Agent 隐形。
+ *
+ * 只能查属性：`addEventListener` 绑定的监听器在标准 DOM API 下不可枚举
+ * （`getEventListeners` 仅存在于 DevTools 控制台），因此这条兜底是有缺口的，
+ * 主要覆盖属性写法。
+ */
+const EVENT_ATTRIBUTES = [
+  'onclick', 'onmousedown', 'onmouseup', 'onkeydown', 'onkeyup', 'ontouchstart'
+]
+
+/** 可滚动容器的溢出取值。 */
+const SCROLLABLE_OVERFLOW = new Set(['auto', 'scroll', 'overlay'])
+
+/**
+ * 判定「确实可滚动」的最小距离。
+ *
+ * 亚像素与边框圆整常让 `scrollHeight` 比 `clientHeight` 大一两像素，阈值过小会把
+ * 满页面的普通容器都报成可滚动。
+ */
+const SCROLL_THRESHOLD = 8
 
 /**
  * 快照，外加与 `elements` 下标一一对应的真实元素引用。
@@ -227,7 +266,11 @@ export function capturePageWithElements(
     const name = accessibleName(element, cache)
     // 纯容器不收录：它自己没有名字，模型无从辨识；而它包着的那些元素会各自被收录，
     // 那才是该操作的目标。实测中侧边菜单的 `<ul>` / `<li>` 就属于这一类。
-    if (!name && hasInteractiveDescendant(element, cache)) return
+    //
+    // `scrollable` 豁免：它的价值恰恰在于「是个装着东西的容器」，模型要的是「这里
+    // 还能往下/往右翻」这条信息，而不是它叫什么。真实表格实测——横向可滚 570px 的
+    // `.el-table__body-wrapper` 因无自身文本被这条规则丢弃，右侧列对 Agent 永远不存在。
+    if (!name && role !== 'scrollable' && hasInteractiveDescendant(element, cache)) return
 
     // 层级：文档序遍历下，栈里留着的都是当前元素的祖先。逐个弹出不再包含它的，
     // 剩余深度即为它在「被收录元素」这棵树里的层级。
@@ -239,7 +282,11 @@ export function capturePageWithElements(
     const snapshot: SnapshotElement = {
       index: snapshotElements.length,
       role,
-      name,
+      // 滚动区通常没有自己的文本，用可滚方向作名字——模型需要的是「往哪边还能翻」，
+      // 而不是它叫什么。
+      name: role === 'scrollable' && !name
+        ? scrollableName(element, cache)
+        : name,
       depth: ancestors.length
     }
     const value = valueOf(element)
@@ -422,8 +469,60 @@ function roleOf(
   if (element.hasAttribute('tabindex')) {
     return detectCursor && isCursorClickable(element, cache) ? 'button' : undefined
   }
-  // 兜底：没有任何语义、但渲染成可点的元素，见 CLICKABLE_CURSOR。
-  return detectCursor && isCursorClickable(element, cache) ? 'button' : undefined
+  // 兜底一：没有任何语义、但渲染成可交互的元素，见 INTERACTIVE_CURSORS。
+  if (detectCursor && isCursorClickable(element, cache)) return 'button'
+  // 兜底二：绑了内联事件却不给指针样式的元素，见 EVENT_ATTRIBUTES。
+  if (hasOwnEventHandler(element)) return 'button'
+  // 兜底三：内部滚动容器。它自己不是「可点」的，但模型需要知道这里还能往下翻。
+  return isScrollable(element, cache) ? 'scrollable' : undefined
+}
+
+/**
+ * 元素自身绑了内联事件，且祖先没有绑。
+ *
+ * 要求祖先没绑，是因为事件委托极其常见：`<div onclick>` 里的每个后代都会因为冒泡
+ * 而「可点」，全收进来会让一次点击产出一堆候选。只认最外层那个绑定点。
+ */
+function hasOwnEventHandler(element: Element): boolean {
+  if (!EVENT_ATTRIBUTES.some(attribute => element.hasAttribute(attribute))) return false
+  let ancestor = element.parentElement
+  while (ancestor) {
+    if (EVENT_ATTRIBUTES.some(attribute => ancestor?.hasAttribute(attribute))) return false
+    ancestor = ancestor.parentElement
+  }
+  return true
+}
+
+/**
+ * 元素是否为可滚动容器，且内容确实溢出了。
+ *
+ * 只看 `overflow` 不够：绝大多数 `overflow: auto` 的容器内容并未超出，报出来纯属
+ * 噪声。必须同时满足「溢出取值允许滚动」与「实际有可滚动距离」。
+ *
+ * 页面级 `scroll` 到不了这类容器，不识别的话下半截内容对 Agent 永远不存在。
+ */
+/** 用可滚方向给滚动区命名，如「可滚动区域（横向）」。 */
+function scrollableName(element: Element, cache: MeasureCache): string {
+  const directions: string[] = []
+  if (canScrollVertically(element, cache)) directions.push('纵向')
+  if (canScrollHorizontally(element, cache)) directions.push('横向')
+  return `可滚动区域（${directions.join('、')}）`
+}
+
+function canScrollVertically(element: Element, cache: MeasureCache): boolean {
+  const style = cache.style(element)
+  if (!style || !SCROLLABLE_OVERFLOW.has(style.overflowY)) return false
+  return element.scrollHeight - (element as HTMLElement).clientHeight > SCROLL_THRESHOLD
+}
+
+function canScrollHorizontally(element: Element, cache: MeasureCache): boolean {
+  const style = cache.style(element)
+  if (!style || !SCROLLABLE_OVERFLOW.has(style.overflowX)) return false
+  return element.scrollWidth - (element as HTMLElement).clientWidth > SCROLL_THRESHOLD
+}
+
+function isScrollable(element: Element, cache: MeasureCache): boolean {
+  return canScrollVertically(element, cache) || canScrollHorizontally(element, cache)
 }
 
 /**
@@ -436,7 +535,8 @@ function roleOf(
  * 三条排除规则，都只作用于「靠 cursor 兜底」这条路径，语义标签不受影响：
  */
 function isCursorClickable(element: Element, cache: MeasureCache): boolean {
-  if (cache.style(element)?.cursor !== CLICKABLE_CURSOR) return false
+  const cursor = cache.style(element)?.cursor
+  if (!cursor || !INTERACTIVE_CURSORS.has(cursor)) return false
   // `<label>` 永远不是可点目标，它只是某个控件的说明文字。
   //
   // 真实弹窗实测：Element UI 给必填项标签加了 `cursor: pointer`，于是标签被判成
@@ -453,8 +553,10 @@ function isCursorClickable(element: Element, cache: MeasureCache): boolean {
   // 2. 内部含语义可交互元素——本元素只是容器，真正该点的是里面那个。
   if (element.querySelector(CANDIDATE_SELECTOR)) return false
   // 3. 还有更内层的可点元素——取最内层，它对应的点击目标更精确。
-  return !Array.from(element.children).some(child =>
-    cache.style(child)?.cursor === CLICKABLE_CURSOR)
+  return !Array.from(element.children).some(child => {
+    const childCursor = cache.style(child)?.cursor
+    return childCursor !== undefined && INTERACTIVE_CURSORS.has(childCursor)
+  })
 }
 
 function isReadonly(element: Element): boolean {
@@ -737,8 +839,10 @@ function hasInteractiveDescendant(element: Element, cache?: MeasureCache): boole
   if (element.matches(SEMANTIC_LEAF_SELECTOR)) return false
   if (element.querySelector(CANDIDATE_SELECTOR)) return true
   if (!cache) return false
-  return Array.from(element.querySelectorAll('*'))
-    .some(child => cache.style(child)?.cursor === CLICKABLE_CURSOR)
+  return Array.from(element.querySelectorAll('*')).some(child => {
+    const childCursor = cache.style(child)?.cursor
+    return childCursor !== undefined && INTERACTIVE_CURSORS.has(childCursor)
+  })
 }
 
 /** 只取元素自己的直接文本子节点，不含任何后代的文本。 */

@@ -100,5 +100,34 @@ export function createPageTools(options: PageToolOptions): ToolDefinition[] {
     }
   })
 
-  return [readPage, clickElement, inputText, selectOption]
+  const scrollPage = defineReadTool({
+    ...base,
+    name: 'scroll',
+    version: 1,
+    title: '滚动',
+    description: '滚动页面或某个内部滚动区。'
+      + '读取页面只返回视口附近的元素，要找的东西不在清单里时先滚动再重新读取。'
+      + '快照中标为 scrollable 的元素是内部滚动区，页面滚动到不了，'
+      + '需要把它的索引传给 index。',
+    schema: Type.Object({
+      pages: Type.Optional(Type.Number({
+        description: '滚动几屏，负数向上，缺省 1'
+      })),
+      index: Type.Optional(Type.Integer({
+        description: '内部滚动区的元素索引；缺省滚动整个页面',
+        minimum: 0
+      }))
+    }, { additionalProperties: false }),
+    execute: async (_ctx, input: { pages?: number, index?: number }) => {
+      controller.scroll(input.pages ?? 1, input.index)
+      return {
+        ok: true,
+        message: input.index === undefined
+          ? `已滚动页面 ${input.pages ?? 1} 屏`
+          : `已滚动 [${input.index}] ${input.pages ?? 1} 屏`
+      }
+    }
+  })
+
+  return [readPage, clickElement, inputText, selectOption, scrollPage]
 }
