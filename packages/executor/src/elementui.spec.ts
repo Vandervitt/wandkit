@@ -181,6 +181,140 @@ describe('容器不得吞掉整棵子树的文本', () => {
   })
 })
 
+describe('ARIA widget role 白名单完整性', () => {
+  /**
+   * 真实弹窗实测：Element UI 的数字输入框渲染成
+   * `<input type="text" role="spinbutton">`（W3C 标准 role）。因 `spinbutton` 不在
+   * 白名单里，4 个单价框全部消失，模型根本无法填写调价表单。
+   *
+   * 显式 role 优先于标签推断，所以「它本来就是 `<input>`」兜不住这个洞——
+   * **白名单漏一个 role，就等于整类控件对 Agent 隐形**。
+   */
+  it('role="spinbutton" 的数字输入框必须收录', () => {
+    render(`<input type="text" role="spinbutton" placeholder="请输入AI呼出单价"
+      aria-valuenow="0.01" value="0.01">`)
+
+    expect(capturePage().elements.map(e => `${e.role} ${e.name}`))
+      .toEqual(['spinbutton 请输入AI呼出单价'])
+  })
+
+  it('整个调价表单的四个单价框全部收录', () => {
+    render(`
+      <form>
+        <input type="text" role="spinbutton" placeholder="请输入AI呼出单价" value="0.01">
+        <input type="text" role="spinbutton" placeholder="请输入AI呼入单价" value="0.01">
+        <input type="text" role="spinbutton" placeholder="请输入短信单价" value="0">
+        <input type="text" role="spinbutton" placeholder="请输入坐席费">
+      </form>`)
+
+    expect(capturePage().elements).toHaveLength(4)
+  })
+
+  it('覆盖其余 ARIA widget role', () => {
+    render(`
+      <div role="menuitemcheckbox">显示已停用</div>
+      <div role="menuitemradio">按月</div>
+      <div role="treeitem">组织架构</div>
+      <div role="switch" aria-checked="true">启用</div>
+    `)
+
+    expect(capturePage().elements.map(e => e.role))
+      .toEqual(['menuitemcheckbox', 'menuitemradio', 'treeitem', 'switch'])
+  })
+})
+
+describe('tabindex 不等于可点击', () => {
+  /**
+   * 真实弹窗实测：Element UI 的 tooltip 图标是
+   * `<span class="el-tooltip" tabindex="0">`，仅凭 `tabindex` 会被判成 button；
+   * 而它嵌在标签文字里，于是整条表单项被当成按钮，真正该操作的输入框反被容器规则
+   * 吞掉——「调价」弹窗里 6 个输入框只剩 3 个，模型根本填不了单价。
+   */
+  it('仅有 tabindex 而无指针样式的提示图标不算按钮', () => {
+    render(`
+      <div class="el-form-item">
+        <label><span>AI呼出单价<span class="el-tooltip" tabindex="0"></span></span></label>
+        <div><input type="text" placeholder="请输入AI呼出单价" value="0.01"></div>
+      </div>`)
+
+    // label 未用 for 关联也非包裹式（Element UI 的写法），名字退回 placeholder。
+    expect(capturePage().elements.map(e => `${e.role} ${e.name}`))
+      .toEqual(['textbox 请输入AI呼出单价'])
+  })
+
+  it('tabindex 加指针样式仍算按钮——自定义可点元素的常见写法', () => {
+    render('<div tabindex="0" style="cursor:pointer">自定义按钮</div>')
+
+    expect(capturePage().elements.map(e => `${e.role} ${e.name}`))
+      .toEqual(['button 自定义按钮'])
+  })
+
+  it('整个调价表单的输入框全部收录', () => {
+    render(`
+      <form>
+        <div class="el-form-item"><label><span>AI呼出单价<span class="el-tooltip" tabindex="0"></span></span></label>
+          <input type="text" placeholder="请输入AI呼出单价" value="0.01"></div>
+        <div class="el-form-item"><label><span>AI呼入单价</span></label>
+          <input type="text" placeholder="请输入AI呼入单价" value="0.02"></div>
+        <div class="el-form-item"><label><span>短信单价</span></label>
+          <input type="text" placeholder="请输入短信单价" value="0"></div>
+        <div class="el-form-item"><label><span>坐席费</span></label>
+          <input type="text" placeholder="请输入坐席费"></div>
+      </form>`)
+
+    expect(capturePage().elements.filter(e => e.role === 'textbox')).toHaveLength(4)
+  })
+})
+
+describe('label 不得被当作可点目标', () => {
+  /**
+   * 真实弹窗实测：Element UI 给必填项标签加了 `cursor: pointer`，标签因此被判成
+   * button；又因为它包着输入框而触发容器规则，把真正该操作的输入框整个吞掉——
+   * 「调价」弹窗里 6 个输入框只剩 4 个，模型根本填不了单价。
+   */
+  it('带 cursor:pointer 的 label 不产出按钮，输入框照常收录', () => {
+    render(`
+      <div class="el-form-item">
+        <label class="el-form-item__label" style="cursor:pointer">AI呼出单价</label>
+        <div class="el-form-item__content">
+          <input type="text" placeholder="请输入AI呼出单价" value="0.01">
+        </div>
+      </div>`)
+
+    expect(capturePage().elements.map(e => `${e.role} ${e.name}`))
+      .toEqual(['textbox 请输入AI呼出单价'])
+  })
+
+  it('多个必填项标签不会互相吞掉各自的输入框', () => {
+    render(`
+      <form>
+        <div class="el-form-item">
+          <label style="cursor:pointer">AI呼出单价</label>
+          <input type="text" placeholder="请输入AI呼出单价" value="0.01">
+        </div>
+        <div class="el-form-item">
+          <label style="cursor:pointer">AI呼入单价</label>
+          <input type="text" placeholder="请输入AI呼入单价" value="0.02">
+        </div>
+        <div class="el-form-item">
+          <label style="cursor:pointer">短信单价</label>
+          <input type="text" placeholder="请输入短信单价" value="0">
+        </div>
+      </form>`)
+
+    expect(capturePage().elements.map(e => e.value))
+      .toEqual(['0.01', '0.02', '0'])
+  })
+
+  it('包裹式 label 仍能为控件提供名字', () => {
+    // 排除 label 只是不把它当「可点目标」，它作为名字来源的职责不受影响。
+    render('<label style="cursor:pointer">手机号<input type="text"></label>')
+
+    expect(capturePage().elements.map(e => `${e.role} ${e.name}`))
+      .toEqual(['textbox 手机号'])
+  })
+})
+
 describe('cursor 兜底不得产出重复项', () => {
   /**
    * 真实浏览器实测发现的问题：`<button><span>删除</span></button>` 里 button 按标签

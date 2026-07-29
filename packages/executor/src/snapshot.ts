@@ -74,10 +74,20 @@ export interface PageSnapshot {
   elements: SnapshotElement[]
 }
 
-/** 参与快照的角色。不在此列的元素即使可聚焦也不收录，避免快照被容器噪声淹没。 */
+/**
+ * 参与快照的角色。不在此列的元素即使可聚焦也不收录，避免快照被容器噪声淹没。
+ *
+ * 覆盖 WAI-ARIA 中全部「可由用户直接操作」的 widget role。**漏一个就等于整类控件
+ * 对 Agent 隐形**——真实弹窗实测：数字输入框带 `role="spinbutton"`（W3C 标准），
+ * 因不在此列而被整体排除，「调价」弹窗里 4 个单价框全部消失，模型根本无法填写。
+ *
+ * 显式 role 优先于标签推断，因此这里的遗漏无法被「它本来就是 `<input>`」兜住。
+ */
 const INTERACTIVE_ROLES = new Set([
-  'button', 'link', 'textbox', 'combobox', 'checkbox', 'radio',
-  'switch', 'tab', 'menuitem', 'option', 'slider', 'searchbox'
+  'button', 'link', 'textbox', 'searchbox', 'combobox', 'spinbutton',
+  'checkbox', 'radio', 'switch', 'slider',
+  'tab', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+  'option', 'treeitem', 'gridcell'
 ])
 
 /** 原生就可交互的**叶子**标签。它们的内部结构只是装饰，不该单独成项。 */
@@ -401,7 +411,17 @@ function roleOf(
   if (element.hasAttribute('contenteditable')) {
     return element.getAttribute('contenteditable') === 'true' ? 'textbox' : undefined
   }
-  if (element.hasAttribute('tabindex')) return 'button'
+  // `tabindex` 只说明「可聚焦」，不等于「可点击」。
+  //
+  // 真实弹窗实测：Element UI 的 tooltip 图标（`<span class="el-tooltip" tabindex="0">`）
+  // 会命中这条规则被判成 button，而它包着标签文字，于是整条表单项被当成按钮，真正
+  // 该操作的输入框反被容器规则吞掉——「调价」弹窗里 6 个输入框只剩 3 个。
+  //
+  // 因此额外要求它渲染成可点（`cursor: pointer`）：真按钮总会有指针样式，纯提示
+  // 图标不会。
+  if (element.hasAttribute('tabindex')) {
+    return detectCursor && isCursorClickable(element, cache) ? 'button' : undefined
+  }
   // 兜底：没有任何语义、但渲染成可点的元素，见 CLICKABLE_CURSOR。
   return detectCursor && isCursorClickable(element, cache) ? 'button' : undefined
 }
@@ -417,6 +437,12 @@ function roleOf(
  */
 function isCursorClickable(element: Element, cache: MeasureCache): boolean {
   if (cache.style(element)?.cursor !== CLICKABLE_CURSOR) return false
+  // `<label>` 永远不是可点目标，它只是某个控件的说明文字。
+  //
+  // 真实弹窗实测：Element UI 给必填项标签加了 `cursor: pointer`，于是标签被判成
+  // button，又因为它包着输入框而触发容器规则，把真正该操作的输入框整个吞掉——
+  // 一个「调价」弹窗里 6 个输入框只剩 4 个。
+  if (element.tagName.toLowerCase() === 'label') return false
   // 1. 祖先是语义**叶子**（button / a / input 等）——那才是该点的目标，本元素只是
   //    它的内部结构（`<button>` 里的 `<span>`、`<i>` 图标）。
   //
