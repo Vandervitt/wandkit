@@ -50,10 +50,26 @@ describe('渲染', () => {
       ]
     })
 
+    // 符号独立成节点：拼进正文就没法只给符号上色，而「这一步成了没有」
+    // 应当比文案本身更快被看到。
+    expect(partsOf(panel, 'tool-icon').map(e => e.textContent)).toEqual(['✓', '✕'])
     expect(partsOf(panel, 'bubble').map(e => e.textContent))
-      .toEqual(['✓ 已删除', '✕ 目标不存在'])
+      .toEqual(['已删除', '目标不存在'])
     expect(partsOf(panel, 'entry').map(e => e.getAttribute('data-ok')))
       .toEqual(['true', 'false'])
+  })
+
+  it('消息带时分时间戳，工具结果行不带', () => {
+    const panel = mount({
+      entries: [
+        { id: '1', role: 'user', content: '删除张三', at: Date.parse('2026-07-30T09:05:00') },
+        { id: '2', role: 'tool', content: '已删除', ok: true, toolCallId: 'c1', at: 2 }
+      ]
+    })
+
+    const stamps = partsOf(panel, 'time')
+    expect(stamps).toHaveLength(1)
+    expect(stamps[0].textContent).toBe('09:05')
   })
 
   it('工具调用渲染成标签，让人看清 Agent 在做什么', () => {
@@ -69,6 +85,56 @@ describe('渲染', () => {
 
     expect(partsOf(panel, 'tool-chip').map(e => e.textContent))
       .toEqual(['user_query_v1', 'user_delete_v1'])
+    // 无参数的调用没有可展开的内容，不该做成一个点开是空的折叠块。
+    expect(partsOf(panel, 'tool-call')).toHaveLength(0)
+  })
+
+  it('带参数的工具调用可展开，默认折叠', () => {
+    // 名字回答「在做什么」，参数回答「对谁做」，后者才是用户真正需要核对的。
+    const panel = mount({
+      entries: [{
+        id: '1', role: 'assistant', content: '', at: 1,
+        toolCalls: [{
+          id: 'c1', type: 'function',
+          function: { name: 'user_delete_v1', arguments: '{"id":"u_1"}' }
+        }]
+      }]
+    })
+
+    const details = partOf(panel, 'tool-call') as HTMLDetailsElement
+    expect(details).not.toBeNull()
+    expect(details.open).toBe(false)
+    expect(partOf(panel, 'tool-chip')?.textContent).toBe('user_delete_v1')
+    expect(partOf(panel, 'tool-args')?.textContent).toBe('{\n  "id": "u_1"\n}')
+  })
+
+  it('参数不是合法 JSON 时原样展示', () => {
+    // 流式中途或模型出错时 arguments 本就可能不完整，原文比一句「解析失败」有用。
+    const panel = mount({
+      entries: [{
+        id: '1', role: 'assistant', content: '', at: 1,
+        toolCalls: [{
+          id: 'c1', type: 'function', function: { name: 'f', arguments: '{"id":"u_' }
+        }]
+      }]
+    })
+
+    expect(partOf(panel, 'tool-args')?.textContent).toBe('{"id":"u_')
+  })
+
+  it('工具调用参数按纯文本渲染', () => {
+    const panel = mount({
+      entries: [{
+        id: '1', role: 'assistant', content: '', at: 1,
+        toolCalls: [{
+          id: 'c1', type: 'function',
+          function: { name: 'f', arguments: '{"name":"<img src=x onerror=alert(1)>"}' }
+        }]
+      }]
+    })
+
+    expect(partOf(panel, 'tool-args')?.querySelector('img')).toBeNull()
+    expect(partOf(panel, 'tool-args')?.textContent).toContain('<img src=x onerror=alert(1)>')
   })
 
   it('流式中显示光标', () => {
@@ -180,6 +246,112 @@ describe('输入', () => {
     ;(partOf(panel, 'send') as HTMLButtonElement).click()
 
     expect(onSend).toHaveBeenCalled()
+  })
+})
+
+describe('状态可见性', () => {
+  it('标题栏如实反映会话状态', () => {
+    const panel = mount({ status: 'busy' })
+    expect(partOf(panel, 'status')?.getAttribute('data-status')).toBe('busy')
+    expect(partOf(panel, 'status')?.textContent).toContain('执行中')
+
+    panel.state = { entries: [], status: 'awaiting_confirmation' }
+    expect(partOf(panel, 'status')?.getAttribute('data-status'))
+      .toBe('awaiting_confirmation')
+    expect(partOf(panel, 'status')?.textContent).toContain('等待确认')
+  })
+
+  it('进度条只在真正执行时激活', () => {
+    // 等待确认时球在用户脚下，进度条继续扫会造成「系统还在忙」的错觉，
+    // 人就不去点卡片了。
+    const panel = mount({ status: 'busy' })
+    expect(partOf(panel, 'progress')?.getAttribute('data-active')).toBe('true')
+
+    panel.state = { entries: [], status: 'awaiting_confirmation' }
+    expect(partOf(panel, 'progress')?.getAttribute('data-active')).toBe('false')
+  })
+
+  it('锁住输入时占位文案说明原因并指路', () => {
+    // 锁住却不说原因，用户只会觉得界面坏了——尤其该做的事在屏幕别处。
+    const panel = mount({ status: 'awaiting_confirmation' })
+    const input = partOf(panel, 'input') as HTMLTextAreaElement
+
+    expect(input.placeholder).toBe('请先处理上方的确认卡片')
+
+    panel.state = { entries: [], status: 'idle' }
+    expect(input.placeholder).toBe('说点什么…')
+  })
+
+  it('标题由宿主决定，本包不塞自己的品牌', () => {
+    const panel = mount()
+    expect(partOf(panel, 'heading')?.textContent).toBe('助手')
+
+    panel.heading = '客户助手'
+    expect(partOf(panel, 'heading')?.textContent).toBe('客户助手')
+  })
+})
+
+describe('滚动', () => {
+  /** jsdom 没有布局，scrollHeight / clientHeight 恒为 0，只能手工造出滚动位置。 */
+  function fakeLayout(
+    panel: ToolairlockChatPanel,
+    position: { scrollHeight: number, clientHeight: number, scrollTop: number }
+  ): HTMLElement {
+    const log = partOf(panel, 'log')!
+    Object.defineProperty(log, 'scrollHeight', {
+      value: position.scrollHeight, configurable: true
+    })
+    Object.defineProperty(log, 'clientHeight', {
+      value: position.clientHeight, configurable: true
+    })
+    Object.defineProperty(log, 'scrollTop', {
+      value: position.scrollTop, writable: true, configurable: true
+    })
+    return log
+  }
+
+  const entries = [{ id: '1', role: 'user' as const, content: 'x', at: 1 }]
+
+  it('贴底时不显示回到最新按钮', () => {
+    const panel = mount({ entries })
+    const log = fakeLayout(panel, { scrollHeight: 1000, clientHeight: 400, scrollTop: 600 })
+
+    log.dispatchEvent(new Event('scroll'))
+
+    expect((partOf(panel, 'jump') as HTMLButtonElement).hidden).toBe(true)
+  })
+
+  it('往回翻历史时给出回到最新的路', () => {
+    const panel = mount({ entries })
+    const log = fakeLayout(panel, { scrollHeight: 1000, clientHeight: 400, scrollTop: 100 })
+
+    log.dispatchEvent(new Event('scroll'))
+
+    expect((partOf(panel, 'jump') as HTMLButtonElement).hidden).toBe(false)
+  })
+
+  it('点击回到最新即滚到底并收起按钮', () => {
+    const panel = mount({ entries })
+    const log = fakeLayout(panel, { scrollHeight: 1000, clientHeight: 400, scrollTop: 100 })
+    log.dispatchEvent(new Event('scroll'))
+
+    ;(partOf(panel, 'jump') as HTMLButtonElement).click()
+
+    expect(log.scrollTop).toBe(1000)
+    expect((partOf(panel, 'jump') as HTMLButtonElement).hidden).toBe(true)
+  })
+
+  it('用户翻在历史里时新消息不把他拽回底部', () => {
+    const panel = mount({ entries })
+    const log = fakeLayout(panel, { scrollHeight: 1000, clientHeight: 400, scrollTop: 100 })
+
+    panel.state = {
+      entries: [...entries, { id: '2', role: 'assistant', content: 'y', at: 2 }],
+      status: 'idle'
+    }
+
+    expect(log.scrollTop).toBe(100)
+    expect((partOf(panel, 'jump') as HTMLButtonElement).hidden).toBe(false)
   })
 })
 

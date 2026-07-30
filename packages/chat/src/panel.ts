@@ -1,4 +1,4 @@
-import type { ChatConfirmation, ChatEntry, ChatState } from './protocol'
+import type { ChatConfirmation, ChatEntry, ChatState, ChatStatus } from './protocol'
 
 /**
  * 聊天面板，原生自定义元素 + Shadow DOM。
@@ -7,58 +7,266 @@ import type { ChatConfirmation, ChatEntry, ChatState } from './protocol'
  * 这边是**产品**组件，完全可以被接入方替换掉——只要照样把 {@link ChatState} 渲染出来、
  * 把用户动作派发出去即可。
  *
- * 面板自己不持有状态：`state` 进、事件出。这样它与 {@link ChatSession} 之间只有一条
+ * 面板自己不持有状态：`state` 进、事件出。这样它与 `ChatSession` 之间只有一条
  * 单向数据流，接入方也能把同一个会话同时接到自己的 React / Vue 组件上。
  *
  * 确认卡片**不由本组件渲染**：它是治理层唯一面向人的界面，理应由 `@toolairlock/ui`
  * 那个不可裁剪的实现负责。本组件只留一个挂载点，宿主把 `<toolairlock-confirm>` 放进来。
+ *
+ * 视觉上与确认卡片共用一套亮色液态玻璃语言，这样卡片落在面板里不像外来物；同时面板自己
+ * 的玻璃层比卡片轻一档，保证卡片始终是视觉重心——它是需要人做决定的那一块。
  */
 
 const STYLE = `
-:host { display: flex; flex-direction: column; height: 100%; min-height: 0;
+:host {
+  --_fg: var(--tal-fg, #0f1729);
+  --_dim: var(--tal-dim, #64748b);
+  --_faint: var(--tal-faint, #94a2b8);
+  --_line: var(--tal-border, rgba(15, 23, 41, .09));
+  --_glass: var(--tal-glass, rgba(255, 255, 255, .62));
+  --_accent: var(--tal-accent, #0a84ff);
+  --_success: var(--tal-success, #30c95f);
+  --_danger: var(--tal-danger, #ff3b30);
+  display: flex; flex-direction: column; height: 100%; min-height: 0;
   font-family: var(--tal-font, system-ui, -apple-system, "PingFang SC", sans-serif);
-  color: var(--tal-fg, #1f2329); background: var(--tal-bg, #fff); font-size: 14px; }
-[part="log"] { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 16px;
-  display: flex; flex-direction: column; gap: 12px; }
-[part="entry"] { display: flex; flex-direction: column; gap: 4px; max-width: 85%; }
+  font-size: 14px; letter-spacing: -.01em; color: var(--_fg);
+  background:
+    radial-gradient(70% 45% at 12% 4%, rgba(10, 132, 255, .2), transparent 62%),
+    radial-gradient(60% 40% at 92% 20%, rgba(48, 201, 95, .14), transparent 60%),
+    radial-gradient(80% 50% at 60% 104%, rgba(255, 59, 48, .11), transparent 62%),
+    var(--tal-bg, linear-gradient(160deg, #eef2f8, #e3e8f0));
+}
+
+[part="header"] {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+  height: 50px; padding: 0 18px;
+  background: rgba(255, 255, 255, .55);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+  border-bottom: 1px solid rgba(255, 255, 255, .8);
+  box-shadow: 0 1px 0 rgba(15, 23, 41, .05);
+}
+[part="heading"] { font-size: 14px; font-weight: 600; letter-spacing: -.02em; }
+[part="header"] .spacer { flex: 1 1 auto; }
+[part="status"] {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px 4px 8px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 550;
+  background: rgba(15, 23, 41, .06); color: var(--_dim);
+}
+[part="status"][data-status="busy"] { background: rgba(10, 132, 255, .12); color: #0a6ed1; }
+[part="status"][data-status="awaiting_confirmation"] {
+  background: rgba(255, 59, 48, .12); color: #c0271d;
+}
+[part="status-dot"] {
+  width: 6px; height: 6px; border-radius: 50%; background: currentColor;
+}
+[part="status"][data-status="busy"] [part="status-dot"],
+[part="status"][data-status="awaiting_confirmation"] [part="status-dot"] {
+  animation: tal-pulse 1.8s ease-in-out infinite;
+}
+
+[part="progress"] { flex: 0 0 auto; height: 1px; overflow: hidden; background: transparent; }
+[part="progress"][data-active="true"] { background: rgba(10, 132, 255, .14); }
+[part="progress-bar"] { display: block; height: 100%; }
+[part="progress"][data-active="true"] [part="progress-bar"] {
+  background: linear-gradient(90deg, transparent, var(--_accent), transparent);
+  animation: tal-sweep 2.1s ease-in-out infinite;
+}
+
+[part="log-wrap"] { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
+[part="log"] {
+  flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px;
+  display: flex; flex-direction: column; gap: 15px;
+}
+[part="empty"] { margin: auto; color: var(--_faint); font-size: 13.5px; }
+
+[part="entry"] { display: flex; flex-direction: column; gap: 4px; max-width: 88%; }
 [part="entry"][data-role="user"] { align-self: flex-end; align-items: flex-end; }
-[part="bubble"] { padding: 8px 12px; border-radius: var(--tal-radius, 8px);
-  background: var(--tal-bubble-bg, #f4f5f7); line-height: 1.6; white-space: pre-wrap;
-  word-break: break-word; }
-[data-role="user"] [part="bubble"] { background: var(--tal-user-bg, #2b6cb0); color: #fff; }
-[data-role="tool"] [part="bubble"] { background: transparent; padding: 2px 0;
-  color: #6b7280; font-size: 13px; }
-[data-role="tool"][data-ok="false"] [part="bubble"] { color: var(--tal-danger, #d64545); }
+[part="entry"][data-role="tool"] {
+  max-width: 100%; flex-direction: row; align-items: center; gap: 9px;
+  padding: 8px 12px; border-radius: 12px;
+  background: rgba(255, 255, 255, .62);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, .9);
+  box-shadow: 0 6px 16px -12px rgba(15, 23, 41, .32);
+}
+[part="bubble"] {
+  padding: 10px 15px; border-radius: 20px 20px 20px 6px; line-height: 1.66;
+  white-space: pre-wrap; word-break: break-word;
+  background: var(--_glass);
+  -webkit-backdrop-filter: blur(18px) saturate(1.5);
+  backdrop-filter: blur(18px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, .9);
+  box-shadow: 0 8px 20px -14px rgba(15, 23, 41, .34);
+}
+[data-role="user"] [part="bubble"] {
+  border-radius: 20px 20px 6px 20px; border-color: transparent; color: #fff;
+  background: linear-gradient(#3d9bff, #0a7ff0);
+  box-shadow: 0 10px 22px -12px rgba(10, 132, 255, .8), inset 0 1px 0 rgba(255, 255, 255, .35);
+}
+[data-role="tool"] [part="bubble"] {
+  padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+  font-size: 12.5px; color: var(--_dim); flex: 1 1 auto;
+}
+[part="tool-icon"] {
+  flex: 0 0 auto; font-size: 11px; font-weight: 700; color: var(--_success);
+}
+[data-ok="false"] [part="tool-icon"], [data-ok="false"] [part="bubble"] { color: #d92b21; }
+[part="entry"][data-role="tool"][data-ok="false"] {
+  background: rgba(255, 59, 48, .09); border-color: rgba(255, 59, 48, .22);
+}
+
 [part="tools"] { display: flex; flex-wrap: wrap; gap: 6px; }
-[part="tool-chip"] { padding: 2px 8px; border-radius: 999px; background: #eef2f7;
-  color: #4b5563; font-size: 12px;
-  font-family: var(--tal-mono, ui-monospace, SFMono-Regular, Menlo, monospace); }
-[part="cursor"] { display: inline-block; width: 7px; height: 1em; vertical-align: -2px;
-  background: currentColor; animation: tal-blink 1s steps(2) infinite; }
-@keyframes tal-blink { 0%, 50% { opacity: 1 } 50.01%, 100% { opacity: 0 } }
-[part="error"] { margin: 0 16px; padding: 8px 12px; border-radius: 6px;
-  background: #fdf2f2; color: var(--tal-danger, #d64545); }
+[part="tool-call"] {
+  border-radius: 10px; background: rgba(255, 255, 255, .6);
+  border: 1px solid rgba(255, 255, 255, .9); overflow: hidden;
+}
+[part="tool-chip"] {
+  display: inline-block; padding: 3px 9px; border-radius: 999px;
+  background: rgba(255, 255, 255, .6); border: 1px solid rgba(255, 255, 255, .9);
+  color: #475569; font-size: 12px;
+  font-family: var(--tal-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+[part="tool-call"] > [part="tool-chip"] {
+  border: 0; background: none; cursor: pointer; user-select: none; list-style: none;
+}
+[part="tool-call"] > [part="tool-chip"]::-webkit-details-marker { display: none; }
+[part="tool-args"] {
+  margin: 0; padding: 8px 10px; overflow-x: auto;
+  background: rgba(15, 23, 41, .05); color: #3c4a60;
+  font-family: var(--tal-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-all;
+}
+
+[part="time"] {
+  font-size: 11px; color: var(--_faint);
+  font-family: var(--tal-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-variant-numeric: tabular-nums;
+}
+[part="cursor"] {
+  display: inline-block; width: 6px; height: 1em; vertical-align: -2px; border-radius: 1px;
+  background: currentColor; animation: tal-blink 1.05s steps(2) infinite;
+}
+
+[part="jump"] {
+  position: absolute; right: 16px; bottom: 14px;
+  width: 34px; height: 34px; padding: 0; border-radius: 50%; cursor: pointer;
+  font: inherit; font-size: 15px; line-height: 1; color: var(--_fg);
+  background: rgba(255, 255, 255, .8);
+  -webkit-backdrop-filter: blur(20px) saturate(1.7);
+  backdrop-filter: blur(20px) saturate(1.7);
+  border: 1px solid rgba(255, 255, 255, .95);
+  box-shadow: 0 12px 28px -12px rgba(15, 23, 41, .45);
+}
+[part="jump"][hidden] { display: none; }
+
+[part="error"] {
+  margin: 0 18px 4px; padding: 9px 13px; border-radius: 13px; font-size: 13px;
+  background: rgba(255, 59, 48, .11); color: #a92018;
+}
+[part="confirmation"] { padding: 4px 16px 14px; }
 [part="confirmation"]:empty { display: none; }
-[part="confirmation"] { padding: 0 16px 12px; }
-[part="composer"] { display: flex; gap: 8px; padding: 12px 16px;
-  border-top: 1px solid var(--tal-border, #dfe2e8); }
-[part="input"] { flex: 1 1 auto; padding: 8px 12px; font: inherit; resize: none;
-  border: 1px solid var(--tal-border, #dfe2e8); border-radius: var(--tal-radius, 8px);
-  color: inherit; background: inherit; }
-[part="input"]:disabled { opacity: .6; }
-[part="send"] { padding: 8px 18px; font: inherit; cursor: pointer; color: #fff;
-  border: none; border-radius: var(--tal-radius, 8px); background: var(--tal-user-bg, #2b6cb0); }
-[part="send"]:disabled { opacity: .5; cursor: default; }
-[part="empty"] { margin: auto; color: #9ca3af; }
+
+[part="composer"] {
+  flex: 0 0 auto; display: flex; align-items: flex-end; gap: 10px; padding: 13px 18px;
+  background: rgba(255, 255, 255, .55);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  backdrop-filter: blur(24px) saturate(1.6);
+  border-top: 1px solid rgba(255, 255, 255, .85);
+}
+[part="input"] {
+  flex: 1 1 auto; padding: 10px 15px; font: inherit; resize: none; overflow-y: auto;
+  max-height: 132px; border-radius: 20px; color: inherit;
+  background: rgba(255, 255, 255, .9); border: 1px solid rgba(15, 23, 41, .1);
+}
+[part="input"]:focus { outline: 2px solid rgba(10, 132, 255, .45); outline-offset: -1px; }
+[part="input"]:disabled { background: rgba(255, 255, 255, .5); color: var(--_dim); }
+[part="send"] {
+  flex: 0 0 auto; padding: 10px 18px; font: inherit; font-weight: 550; cursor: pointer;
+  border: none; border-radius: 999px; color: #fff;
+  background: linear-gradient(#3d9bff, #0a7ff0);
+  box-shadow: 0 10px 22px -12px rgba(10, 132, 255, .9), inset 0 1px 0 rgba(255, 255, 255, .38);
+}
+[part="send"]:disabled {
+  cursor: default; color: var(--_faint); background: rgba(15, 23, 41, .07); box-shadow: none;
+}
+
+@keyframes tal-blink { 0%, 50% { opacity: 1 } 50.01%, 100% { opacity: 0 } }
+@keyframes tal-pulse { 50% { opacity: .3 } }
+@keyframes tal-sweep {
+  0% { transform: translateX(-100%) } 100% { transform: translateX(100%) }
+}
+@media (prefers-reduced-motion: reduce) {
+  [part="status-dot"], [part="progress-bar"], [part="cursor"] { animation: none !important; }
+}
 `
 
-/** 角色对应的展示前缀。tool 结果用符号，避免与助手发言混淆。 */
-const TOOL_PREFIX = { true: '✓ ', false: '✕ ' }
+/** 工具结果的成败符号。用符号而不是文字，避免与助手发言混淆。 */
+const TOOL_ICON = { true: '✓', false: '✕' }
+
+/** 状态在界面上的说法。回答的是「我现在能不能说话」。 */
+const STATUS_LABEL: Record<ChatStatus, string> = {
+  idle: '就绪',
+  busy: '执行中',
+  awaiting_confirmation: '等待确认'
+}
+
+/**
+ * 输入框占位文案随状态变化。
+ *
+ * 锁住输入却不说原因，用户只会觉得界面坏了——尤其 `awaiting_confirmation`，此时该做的
+ * 事在屏幕别处（确认卡片上），不指路他就卡在这儿。
+ */
+const PLACEHOLDER: Record<ChatStatus, string> = {
+  idle: '说点什么…',
+  busy: '执行中，请稍候…',
+  awaiting_confirmation: '请先处理上方的确认卡片'
+}
+
+/** 判定「贴底」的容差。用户往回翻历史时不该被新消息拽回去。 */
+const BOTTOM_SLACK = 40
+
+/** 输入框自增高的上限，约 5 行。 */
+const INPUT_MAX_HEIGHT = 132
+
+/**
+ * 格式化工具调用参数供展开查看。
+ *
+ * 解析失败就原样展示：`arguments` 是模型吐出的字符串，流式中途或模型出错时本就可能不是
+ * 合法 JSON，那种时候原文比一句「解析失败」有用。
+ */
+function formatArguments(raw: string): string {
+  const text = raw.trim()
+  if (text === '' || text === '{}') return ''
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2)
+  } catch (_error) {
+    return text
+  }
+}
+
+/** 只显示时分：面板里的相对时序才是有用的信息，日期由业务侧的会话列表负责。 */
+function formatTime(at: number): string {
+  const time = new Date(at)
+  if (Number.isNaN(time.getTime())) return ''
+  const hours = String(time.getHours()).padStart(2, '0')
+  const minutes = String(time.getMinutes()).padStart(2, '0')
+  return `${hours}:${minutes}`
+}
 
 export class ToolairlockChatPanel extends HTMLElement {
   private readonly root: ShadowRoot
   private current: ChatState = { entries: [], status: 'idle' }
+  private headingText = '助手'
   private log!: HTMLElement
+  private headingNode!: HTMLElement
+  private statusNode!: HTMLElement
+  private statusLabel!: HTMLElement
+  private progress!: HTMLElement
+  private jumpButton!: HTMLButtonElement
   private confirmationSlot!: HTMLElement
   private errorBox!: HTMLElement
   private input!: HTMLTextAreaElement
@@ -80,6 +288,16 @@ export class ToolairlockChatPanel extends HTMLElement {
     return this.current
   }
 
+  /** 标题栏文案。产品名由宿主决定，本包不往里塞自己的品牌。 */
+  set heading(value: string) {
+    this.headingText = value
+    if (this.built) this.headingNode.textContent = value
+  }
+
+  get heading(): string {
+    return this.headingText
+  }
+
   connectedCallback(): void {
     this.build()
     this.render()
@@ -98,25 +316,92 @@ export class ToolairlockChatPanel extends HTMLElement {
     const style = document.createElement('style')
     style.textContent = STYLE
 
+    this.root.append(
+      style,
+      this.buildHeader(),
+      this.buildLog(),
+      this.buildErrorBox(),
+      this.buildConfirmationSlot(),
+      this.buildComposer()
+    )
+  }
+
+  private buildHeader(): DocumentFragment {
+    const fragment = document.createDocumentFragment()
+
+    const header = document.createElement('div')
+    header.setAttribute('part', 'header')
+
+    this.headingNode = document.createElement('div')
+    this.headingNode.setAttribute('part', 'heading')
+    this.headingNode.textContent = this.headingText
+
+    const spacer = document.createElement('span')
+    spacer.className = 'spacer'
+
+    this.statusNode = document.createElement('span')
+    this.statusNode.setAttribute('part', 'status')
+    const dot = document.createElement('span')
+    dot.setAttribute('part', 'status-dot')
+    this.statusLabel = document.createElement('span')
+    this.statusNode.append(dot, this.statusLabel)
+
+    header.append(this.headingNode, spacer, this.statusNode)
+
+    this.progress = document.createElement('div')
+    this.progress.setAttribute('part', 'progress')
+    const bar = document.createElement('span')
+    bar.setAttribute('part', 'progress-bar')
+    this.progress.appendChild(bar)
+
+    fragment.append(header, this.progress)
+    return fragment
+  }
+
+  private buildLog(): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.setAttribute('part', 'log-wrap')
+
     this.log = document.createElement('div')
     this.log.setAttribute('part', 'log')
     this.log.setAttribute('role', 'log')
     this.log.setAttribute('aria-live', 'polite')
+    this.log.addEventListener('scroll', () => this.syncJumpButton())
 
+    // 往回翻历史时给一条回到最新的路。没有它，长会话里用户只能一路手动滚。
+    this.jumpButton = document.createElement('button')
+    this.jumpButton.setAttribute('part', 'jump')
+    this.jumpButton.type = 'button'
+    this.jumpButton.textContent = '↓'
+    this.jumpButton.setAttribute('aria-label', '回到最新消息')
+    this.jumpButton.hidden = true
+    this.jumpButton.addEventListener('click', () => this.scrollToBottom())
+
+    wrap.append(this.log, this.jumpButton)
+    return wrap
+  }
+
+  private buildErrorBox(): HTMLElement {
     this.errorBox = document.createElement('div')
     this.errorBox.setAttribute('part', 'error')
     this.errorBox.setAttribute('role', 'alert')
+    return this.errorBox
+  }
 
+  private buildConfirmationSlot(): HTMLElement {
     this.confirmationSlot = document.createElement('div')
     this.confirmationSlot.setAttribute('part', 'confirmation')
+    return this.confirmationSlot
+  }
 
+  private buildComposer(): HTMLElement {
     const composer = document.createElement('div')
     composer.setAttribute('part', 'composer')
 
     this.input = document.createElement('textarea')
     this.input.setAttribute('part', 'input')
     this.input.rows = 1
-    this.input.placeholder = '说点什么…'
+    this.input.placeholder = PLACEHOLDER.idle
     this.input.setAttribute('aria-label', '输入消息')
     // Enter 发送、Shift+Enter 换行——聊天界面的通用约定。
     this.input.addEventListener('keydown', event => {
@@ -125,6 +410,7 @@ export class ToolairlockChatPanel extends HTMLElement {
         this.send()
       }
     })
+    this.input.addEventListener('input', () => this.autoGrow())
 
     this.sendButton = document.createElement('button')
     this.sendButton.setAttribute('part', 'send')
@@ -133,13 +419,27 @@ export class ToolairlockChatPanel extends HTMLElement {
     this.sendButton.addEventListener('click', () => this.send())
 
     composer.append(this.input, this.sendButton)
-    this.root.append(style, this.log, this.errorBox, this.confirmationSlot, composer)
+    return composer
+  }
+
+  /**
+   * 输入框随内容长高。
+   *
+   * 固定单行会让多行输入变成一条只能看见最后一行的缝，用户没法在发出前检查自己写了什么。
+   */
+  private autoGrow(): void {
+    this.input.style.height = 'auto'
+    const wanted = this.input.scrollHeight
+    // scrollHeight 为 0 意味着没有布局（未挂载、display:none 或 jsdom），
+    // 此时写死一个 0px 高度只会把输入框压没了。
+    this.input.style.height = wanted > 0 ? `${Math.min(wanted, INPUT_MAX_HEIGHT)}px` : ''
   }
 
   private send(): void {
     const text = this.input.value.trim()
     if (!text || this.isLocked()) return
     this.input.value = ''
+    this.autoGrow()
     this.dispatchEvent(new CustomEvent('send', {
       bubbles: true, composed: true, detail: { text }
     }))
@@ -153,16 +453,29 @@ export class ToolairlockChatPanel extends HTMLElement {
   private render(): void {
     if (!this.built) return
     this.renderLog()
+    this.renderStatus()
+
     this.errorBox.textContent = this.current.error ?? ''
     this.errorBox.style.display = this.current.error ? '' : 'none'
+
     const locked = this.isLocked()
     this.input.disabled = locked
     this.sendButton.disabled = locked
+    this.input.placeholder = PLACEHOLDER[this.current.status]
+  }
+
+  private renderStatus(): void {
+    const status = this.current.status
+    this.statusNode.setAttribute('data-status', status)
+    this.statusLabel.textContent = STATUS_LABEL[status]
+    // 进度条只在真正在跑的时候动。等待确认时球在用户脚下，让条子继续扫会造成
+    // 「系统还在忙」的错觉，人就不去点卡片了。
+    this.progress.setAttribute('data-active', String(status === 'busy'))
   }
 
   private renderLog(): void {
     // 重绘前记录是否贴底：用户往回翻历史时不该被新消息拽回去。
-    const wasAtBottom = this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < 40
+    const wasAtBottom = this.isAtBottom()
     this.log.replaceChildren()
 
     if (this.current.entries.length === 0) {
@@ -170,13 +483,28 @@ export class ToolairlockChatPanel extends HTMLElement {
       empty.setAttribute('part', 'empty')
       empty.textContent = '还没有对话'
       this.log.appendChild(empty)
+      this.jumpButton.hidden = true
       return
     }
 
     this.current.entries.forEach(entry => {
       this.log.appendChild(this.renderEntry(entry))
     })
-    if (wasAtBottom) this.log.scrollTop = this.log.scrollHeight
+    if (wasAtBottom) this.scrollToBottom()
+    else this.syncJumpButton()
+  }
+
+  private isAtBottom(): boolean {
+    return this.log.scrollHeight - this.log.scrollTop - this.log.clientHeight < BOTTOM_SLACK
+  }
+
+  private scrollToBottom(): void {
+    this.log.scrollTop = this.log.scrollHeight
+    this.jumpButton.hidden = true
+  }
+
+  private syncJumpButton(): void {
+    this.jumpButton.hidden = this.isAtBottom()
   }
 
   /**
@@ -191,13 +519,19 @@ export class ToolairlockChatPanel extends HTMLElement {
     wrapper.setAttribute('data-role', entry.role)
     if (entry.ok !== undefined) wrapper.setAttribute('data-ok', String(entry.ok))
 
+    // 成败符号独立成节点，而不是拼进正文：拼进去就没法只给符号上色，
+    // 而「这一步成了没有」应当比文案本身更快被看到。
+    if (entry.role === 'tool' && entry.ok !== undefined) {
+      const icon = document.createElement('span')
+      icon.setAttribute('part', 'tool-icon')
+      icon.textContent = TOOL_ICON[String(entry.ok) as 'true' | 'false']
+      wrapper.appendChild(icon)
+    }
+
     if (entry.content || entry.streaming) {
       const bubble = document.createElement('div')
       bubble.setAttribute('part', 'bubble')
-      const prefix = entry.role === 'tool' && entry.ok !== undefined
-        ? TOOL_PREFIX[String(entry.ok) as 'true' | 'false']
-        : ''
-      bubble.textContent = prefix + entry.content
+      bubble.textContent = entry.content
       if (entry.streaming) {
         const cursor = document.createElement('span')
         cursor.setAttribute('part', 'cursor')
@@ -206,19 +540,58 @@ export class ToolairlockChatPanel extends HTMLElement {
       wrapper.appendChild(bubble)
     }
 
-    if (entry.toolCalls?.length) {
-      const tools = document.createElement('div')
-      tools.setAttribute('part', 'tools')
-      entry.toolCalls.forEach(call => {
+    if (entry.toolCalls?.length) wrapper.appendChild(this.renderToolCalls(entry.toolCalls))
+
+    // 工具结果行是单行布局，塞时间会挤掉正文；它的时序由上下两条消息交代得清楚。
+    if (entry.role !== 'tool') {
+      const time = formatTime(entry.at)
+      if (time) {
+        const stamp = document.createElement('span')
+        stamp.setAttribute('part', 'time')
+        stamp.textContent = time
+        wrapper.appendChild(stamp)
+      }
+    }
+
+    return wrapper
+  }
+
+  /**
+   * 渲染本轮发起的工具调用。
+   *
+   * 有参数的做成可展开——名字回答「在做什么」，参数回答「对谁做」，而后者往往才是用户
+   * 真正需要核对的东西（删的是哪个客户）。默认折叠，日常不被 JSON 噪声淹没。
+   */
+  private renderToolCalls(calls: NonNullable<ChatEntry['toolCalls']>): HTMLElement {
+    const tools = document.createElement('div')
+    tools.setAttribute('part', 'tools')
+
+    calls.forEach(call => {
+      const args = formatArguments(call.function.arguments ?? '')
+      if (args === '') {
         const chip = document.createElement('span')
         chip.setAttribute('part', 'tool-chip')
         chip.textContent = call.function.name
         tools.appendChild(chip)
-      })
-      wrapper.appendChild(tools)
-    }
+        return
+      }
 
-    return wrapper
+      const details = document.createElement('details')
+      details.setAttribute('part', 'tool-call')
+
+      const summary = document.createElement('summary')
+      summary.setAttribute('part', 'tool-chip')
+      summary.textContent = call.function.name
+
+      const pre = document.createElement('pre')
+      pre.setAttribute('part', 'tool-args')
+      pre.textContent = args
+
+      details.append(summary, pre)
+      tools.appendChild(details)
+    })
+
+    return tools
   }
 }
 
