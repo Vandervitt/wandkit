@@ -27,7 +27,7 @@ export type {
   CaptureOptions
 } from './snapshot'
 
-export { PageController } from './controller'
+export { PageActionError, PageController } from './controller'
 export type { PageControllerOptions } from './controller'
 
 export {
@@ -45,3 +45,5 @@ export type {
 
 export { createPageTools } from './tools'
 export type { PageToolOptions } from './tools'
+
+export { PAGE_AGENT_SYSTEM_PROMPT } from './prompt'

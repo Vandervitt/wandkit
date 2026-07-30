@@ -12,6 +12,27 @@ import {
 } from './routeWatcher'
 
 /**
+ * 模型可以自行纠正的操作失败。
+ *
+ * 「索引失效了」「这个元素是只读的」「没有这个选项」——这些**不是程序缺陷**，而是
+ * 逐步重读模式下预期内的模型行为，和参数校验失败同类。它们的正确归宿是回喂给模型
+ * 让它下一轮改正，而不是当成异常炸出去。
+ *
+ * 之所以要单独一个类型：`tools.ts` 只把这一类转成 `ok: false` 的结果，真正的程序
+ * 缺陷仍旧照常抛出。不加区分地 `catch (error)` 会把 bug 一起吞掉，变成模型反复重试
+ * 一个永远不会成功的动作。
+ *
+ * 实测教训：这些错误原先直接抛出，被运行时归一成「工具运行失败，请稍后重试」——
+ * 模型第一步没读页面就点击，拿到的是这句毫无信息量的话，Run 当场判死。
+ */
+export class PageActionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'PageActionError'
+  }
+}
+
+/**
  * 页面控制器：持有「上一次快照的索引 → 真实元素」的映射，并在其上执行动作。
  *
  * 索引之所以要由控制器保管而不是交给模型自己算，是因为**索引只对产生它的那一次
@@ -104,10 +125,10 @@ export class PageController {
     // 只读控件必须先于「能否输入」判断：组件库常用 readonly input 实现下拉，
     // 往里赋值不会报错但也毫无效果，模型会误以为筛选条件已经填好了。
     if (isReadonlyElement(element)) {
-      throw new Error(`索引 ${index} 的元素是只读的，无法输入；若是下拉选择器请改用选择`)
+      throw new PageActionError(`索引 ${index} 的元素是只读的，无法输入；若是下拉选择器请改用选择`)
     }
     if (!isTextInput(element)) {
-      throw new Error(`索引 ${index} 的元素不支持输入（${element.tagName.toLowerCase()}）`)
+      throw new PageActionError(`索引 ${index} 的元素不支持输入（${element.tagName.toLowerCase()}）`)
     }
     const field = element as HTMLInputElement | HTMLTextAreaElement
     field.focus()
@@ -122,14 +143,14 @@ export class PageController {
     const element = this.elementAt(index)
     assertEnabled(element)
     if (element.tagName.toLowerCase() !== 'select') {
-      throw new Error(`索引 ${index} 的元素不是下拉框`)
+      throw new PageActionError(`索引 ${index} 的元素不是下拉框`)
     }
     const select = element as HTMLSelectElement
     const options = Array.from(select.options)
     const matched = options.find(option => option.textContent?.trim() === optionText)
     if (!matched) {
       const available = options.map(option => option.textContent?.trim()).join('、')
-      throw new Error(`没有名为「${optionText}」的选项。可选：${available}`)
+      throw new PageActionError(`没有名为「${optionText}」的选项。可选：${available}`)
     }
     select.value = matched.value
     select.dispatchEvent(new Event('change', { bubbles: true }))
@@ -164,19 +185,19 @@ export class PageController {
    */
   private elementAt(index: number): Element {
     if (this.routeChangedAt) {
-      throw new Error(
+      throw new PageActionError(
         `页面已跳转到 ${this.routeChangedAt}，此前的索引全部失效，请重新读取页面`
       )
     }
     if (!this.captured) {
-      throw new Error('请先 capture 当前页面，再按索引操作')
+      throw new PageActionError('请先 capture 当前页面，再按索引操作')
     }
     if (!Number.isInteger(index) || index < 0 || index >= this.captured.length) {
-      throw new Error(`索引 ${index} 越界，有效范围 0-${this.captured.length - 1}`)
+      throw new PageActionError(`索引 ${index} 越界，有效范围 0-${this.captured.length - 1}`)
     }
     const element = this.captured[index]
     if (!element.isConnected) {
-      throw new Error(`索引 ${index} 指向的元素已不在当前文档中，请重新读取页面`)
+      throw new PageActionError(`索引 ${index} 指向的元素已不在当前文档中，请重新读取页面`)
     }
     return element
   }
@@ -199,6 +220,6 @@ function assertEnabled(element: Element): void {
   const disabled = (element as HTMLInputElement).disabled === true ||
     element.getAttribute('aria-disabled') === 'true'
   if (disabled) {
-    throw new Error('该元素已禁用，无法操作')
+    throw new PageActionError('该元素已禁用，无法操作')
   }
 }

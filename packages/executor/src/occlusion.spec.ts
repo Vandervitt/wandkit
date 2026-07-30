@@ -108,3 +108,30 @@ describe('真正被盖住仍要排除', () => {
     expect(names).toContain('确 定')
   })
 })
+
+/**
+ * 视口外扩收进来的元素不能被遮挡判定误杀。
+ *
+ * 真实后台实测：侧边栏「话单查询」在 `top=812`、视口高 812，靠 `viewportExpansion`
+ * 被有意收录，但 `elementsFromPoint(x, 812)` 在视口外恒返回空，于是被判成「被遮挡」
+ * 而整项消失。模型只看得到它的文字、拿不到索引，去猜了个邻近下标——点成了「数据报表」。
+ */
+describe('视口外的元素无从判定遮挡', () => {
+  it('取样点全在视口外时按未遮挡处理，元素照常收录', () => {
+    render('<button id="menu">话单查询</button>')
+    const menu = document.getElementById('menu') as HTMLElement
+    // 刚好滚出下边缘：视口过滤靠外扩仍会收它，而 elementsFromPoint 在视口外恒空
+    fakeLayout({ menu: [0, 800, 200, 50] }, () => [])
+
+    expect(capturePage().elements.map(e => e.name)).toContain('话单查询')
+    expect(menu.isConnected).toBe(true)
+  })
+
+  it('视口内确实被盖住的元素照旧排除，兜底没有被放宽', () => {
+    render('<button id="under">确定</button><div id="cover"></div>')
+    const cover = document.getElementById('cover') as HTMLElement
+    fakeLayout({ under: [100, 100, 80, 30], cover: [0, 0, 1400, 800] }, () => [cover])
+
+    expect(capturePage().elements.map(e => e.name)).not.toContain('确定')
+  })
+})

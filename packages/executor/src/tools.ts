@@ -1,6 +1,36 @@
 import { Type } from '@sinclair/typebox'
 import { defineReadTool, type ToolDefinition } from 'toolairlock'
-import { PageController } from './controller'
+import { PageActionError, PageController } from './controller'
+
+/**
+ * 把可纠正的操作失败转成结果，而不是让它抛出去。
+ *
+ * 运行时对**抛出**的异常一律归一成「工具运行失败，请稍后重试」并终结整个 Run。
+ * 对「索引失效了，请重新读取页面」这种指引来说，这是最坏的处理方式：模型既看不到
+ * 该怎么改，也没有下一轮可以改。实测中模型第一步就直接点击（没先读页面），Run 当场
+ * 判死——从用户视角看就是「助手什么都没干就说失败了」。
+ *
+ * 返回 `ok: false` 则会连同原始指引一起回喂给模型，让它自己纠正，这与参数校验失败
+ * 的处理方式一致。
+ *
+ * 只捕获 {@link PageActionError}：真正的程序缺陷仍旧抛出，否则模型会一直重试一个
+ * 永远不可能成功的动作，而 bug 被彻底掩盖。
+ */
+async function guided(
+  run: () => void | Promise<void>,
+  describe: () => string
+): Promise<{ ok: boolean, message: string, retryable?: true }> {
+  try {
+    await run()
+    return { ok: true, message: describe() }
+  } catch (error) {
+    if (error instanceof PageActionError) {
+      // retryable 是关键：没有它，`ok: false` 同样会终结整个 Run，指引写得再好也没人看。
+      return { ok: false, message: error.message, retryable: true }
+    }
+    throw error
+  }
+}
 
 /**
  * 把页面操作做成**通用原语**，而不是逐个业务能力的工具。
@@ -62,10 +92,10 @@ export function createPageTools(options: PageToolOptions): ToolDefinition[] {
     schema: Type.Object({
       index: Type.Integer({ description: '元素索引', minimum: 0 })
     }, { additionalProperties: false }),
-    execute: async (_ctx, input: { index: number }) => {
-      controller.click(input.index)
-      return { ok: true, message: `已点击 [${input.index}]` }
-    }
+    execute: async (_ctx, input: { index: number }) => guided(
+      () => controller.click(input.index),
+      () => `已点击 [${input.index}]`
+    )
   })
 
   const inputText = defineReadTool({
@@ -78,10 +108,10 @@ export function createPageTools(options: PageToolOptions): ToolDefinition[] {
       index: Type.Integer({ description: '元素索引', minimum: 0 }),
       text: Type.String({ description: '要填入的文本' })
     }, { additionalProperties: false }),
-    execute: async (_ctx, input: { index: number, text: string }) => {
-      controller.input(input.index, input.text)
-      return { ok: true, message: `已在 [${input.index}] 填入「${input.text}」` }
-    }
+    execute: async (_ctx, input: { index: number, text: string }) => guided(
+      () => controller.input(input.index, input.text),
+      () => `已在 [${input.index}] 填入「${input.text}」`
+    )
   })
 
   const selectOption = defineReadTool({
@@ -94,10 +124,10 @@ export function createPageTools(options: PageToolOptions): ToolDefinition[] {
       index: Type.Integer({ description: '元素索引', minimum: 0 }),
       option: Type.String({ description: '选项的可见文本' })
     }, { additionalProperties: false }),
-    execute: async (_ctx, input: { index: number, option: string }) => {
-      controller.select(input.index, input.option)
-      return { ok: true, message: `已选择「${input.option}」` }
-    }
+    execute: async (_ctx, input: { index: number, option: string }) => guided(
+      () => controller.select(input.index, input.option),
+      () => `已选择「${input.option}」`
+    )
   })
 
   const scrollPage = defineReadTool({
@@ -118,15 +148,12 @@ export function createPageTools(options: PageToolOptions): ToolDefinition[] {
         minimum: 0
       }))
     }, { additionalProperties: false }),
-    execute: async (_ctx, input: { pages?: number, index?: number }) => {
-      controller.scroll(input.pages ?? 1, input.index)
-      return {
-        ok: true,
-        message: input.index === undefined
-          ? `已滚动页面 ${input.pages ?? 1} 屏`
-          : `已滚动 [${input.index}] ${input.pages ?? 1} 屏`
-      }
-    }
+    execute: async (_ctx, input: { pages?: number, index?: number }) => guided(
+      () => controller.scroll(input.pages ?? 1, input.index),
+      () => input.index === undefined
+        ? `已滚动页面 ${input.pages ?? 1} 屏`
+        : `已滚动 [${input.index}] ${input.pages ?? 1} 屏`
+    )
   })
 
   return [readPage, clickElement, inputText, selectOption, scrollPage]

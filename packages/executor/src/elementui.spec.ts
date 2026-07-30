@@ -354,8 +354,12 @@ describe('Element UI —— 整页快照', () => {
       <div class="el-form-item"><div class="el-form-item__content">${EL_BUTTON}</div></div>
     </form>`)
 
+    // 表单 label 是正文，不是可交互元素，因此不占索引却仍然交给模型——
+    // 占位符说的是「请输入名称」，字段究竟叫什么得看 label。
     expect(formatSnapshot(capturePage())).toBe([
+      '名称',
       '[0] textbox 请输入名称',
+      '公司状态',
       '[1] textbox 公司状态 (readonly)',
       '[2] button 搜索'
     ].join('\n'))

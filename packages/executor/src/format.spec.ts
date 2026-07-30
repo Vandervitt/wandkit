@@ -122,11 +122,15 @@ describe('行上下文——表格里同名按钮的真正解法', () => {
       .toEqual(['国光科技', '示例公司'])
   })
 
-  it('格式化输出把行上下文跟在后面', () => {
+  it('格式化输出把行上下文跟在后面，正文按文档序插在元素之间', () => {
     render(TABLE)
 
+    // 单元格文本既是行上下文，也是页面正文——两者用途不同，都要有：括号里的
+    // 上下文供模型消歧同名按钮，独立成行的正文让模型读得到表格里的数据本身。
     expect(formatSnapshot(capturePage())).toBe([
+      '国光科技',
       '[0] button 删除 (国光科技)',
+      '示例公司',
       '[1] button 删除 (示例公司)'
     ].join('\n'))
   })
@@ -224,5 +228,54 @@ describe('新元素标记——回答「我刚才那次点击造成了什么」'
 
     expect(formatSnapshot(controller.capture())).toContain('*[1] button 确认删除')
     controller.dispose()
+  })
+})
+
+/**
+ * 页面正文。
+ *
+ * 真实后台实测的缺陷：快照只收可交互元素，Agent 于是只会操作、不会阅读。首页
+ * 「客户数量 75」全在 `<p>`/`<td>` 里，快照 15 行全是 button/link，问「今天有多少
+ * 话单」时模型结构性失明，只能回答「找不到」。查询类请求在管理后台占大头。
+ */
+describe('页面正文', () => {
+  it('无可交互元素的详情页照样把结论交给模型', () => {
+    render('<div><h1>话单查询</h1><p>今日话单合计 1842 条</p></div>')
+
+    const text = formatSnapshot(capturePage())
+    expect(text).toContain('话单查询')
+    expect(text).toContain('1842')
+  })
+
+  it('正文不占用元素索引——它点不了，给索引只会诱导模型去点', () => {
+    render('<div><p>共 3 条</p><button>刷新</button></div>')
+
+    const snapshot = capturePage()
+    expect(snapshot.elements.map(e => e.name)).toEqual(['刷新'])
+    expect(snapshot.texts.map(t => t.text)).toContain('共 3 条')
+  })
+
+  it('已被祖先当作可访问名用掉的文本不重复输出', () => {
+    // 组件库遍地都是 <button><span>搜索</span></button>
+    render('<button><span>搜索</span></button>')
+
+    expect(formatSnapshot(capturePage())).toBe('[0] button 搜索')
+  })
+
+  it('只取直接文本，不让每层祖先都重复整段内容', () => {
+    render('<div><section><p>合计 42 条</p></section></div>')
+
+    expect(capturePage().texts.map(t => t.text)).toEqual(['合计 42 条'])
+  })
+
+  it('按文档序插回元素之间，正文与元素的从属关系不丢', () => {
+    render('<div><p>第一段</p><button>甲</button><p>第二段</p><button>乙</button></div>')
+
+    expect(formatSnapshot(capturePage())).toBe([
+      '第一段',
+      '[0] button 甲',
+      '第二段',
+      '[1] button 乙'
+    ].join('\n'))
   })
 })

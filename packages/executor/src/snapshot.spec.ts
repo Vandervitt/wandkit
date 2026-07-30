@@ -179,9 +179,16 @@ describe('formatSnapshot', () => {
     ].join('\n'))
   })
 
-  it('空页面给出明确说明，而不是交出一段空白', () => {
-    render('<div>无可操作项</div>')
+  it('没有元素也没有正文时给出明确说明，而不是交出一段空白', () => {
+    render('<div></div>')
 
     expect(formatSnapshot(capturePage())).toBe('(当前页面没有可交互元素)')
+  })
+
+  it('只有正文、没有可交互元素时，正文照样交给模型', () => {
+    // 详情页、报表页大量属于这一类。当成空页面处理，模型就永远读不到结论。
+    render('<div>今日话单合计 1842 条</div>')
+
+    expect(formatSnapshot(capturePage())).toContain('1842')
   })
 })

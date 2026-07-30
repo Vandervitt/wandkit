@@ -68,10 +68,36 @@ const DISCLOSED_ATTRIBUTES = [
 /** 属性值截断长度。超长的 title 与 id 会迅速吃掉预算，而辨识只需要前几个字。 */
 const MAX_ATTRIBUTE_LENGTH = 20
 
+/**
+ * 页面上的一段正文。
+ *
+ * **为什么必须收**：只收可交互元素，Agent 就只会操作、不会阅读。真实后台实测——
+ * 首页「客户数量 75　坐席数量 1766」全在 `<p>` 和 `<td>` 里，快照 15 行全是
+ * button/link，一个数字都没有；问「今天有多少话单」时模型结构性失明，只能回答
+ * 「找不到」。查询类请求在管理后台里占大头，读不到正文等于废掉一半用途。
+ *
+ * 不占用元素索引：索引是动作原语的坐标，正文不可点击，混进去只会让模型点到空处。
+ */
+export interface TextBlock {
+  /** 归一化后的文本。 */
+  text: string
+  /** 与 {@link SnapshotElement.depth} 同义，用于对齐缩进。 */
+  depth: number
+  /**
+   * 文档序上紧挨在它前面的那个已收录元素的索引，没有则为 `-1`。
+   *
+   * 渲染时靠它把正文插回元素之间——「这段文字属于哪一行、在哪个按钮上方」是模型
+   * 理解表格和卡片的关键，单独堆一段「页面文本」会把这层关系全丢掉。
+   */
+  after: number
+}
+
 export interface PageSnapshot {
   title: string
   url: string
   elements: SnapshotElement[]
+  /** 页面正文，见 {@link TextBlock}。 */
+  texts: TextBlock[]
 }
 
 /**
@@ -241,6 +267,7 @@ export function capturePageWithElements(
 ): CaptureResult {
   const snapshotElements: SnapshotElement[] = []
   const domElements: Element[] = []
+  const texts: TextBlock[] = []
   const detectCursor = options.detectClickableCursor !== false
   const expansion = options.viewportExpansion ?? DEFAULT_VIEWPORT_EXPANSION
   const detectOcclusion = options.detectOcclusion !== false
@@ -250,34 +277,71 @@ export function capturePageWithElements(
 
   const doc = ownerDocumentOf(root)
   const cache = new MeasureCache(doc?.defaultView ?? null)
-  /** 已收录且仍包含当前元素的祖先栈，用于算层级。 */
-  const ancestors: Element[] = []
+  /**
+   * 已收录且仍包含当前元素的祖先栈，用于算层级。
+   *
+   * 连可访问名一起存：判断一段正文是否已经被某个祖先的名字覆盖时要用到——
+   * `<button><span>搜索</span></button>` 这种写法在组件库里遍地都是，不查一下就会
+   * 把「搜索」既作为按钮名、又作为正文各输出一遍。
+   */
+  const ancestors: Array<{ element: Element, name: string }> = []
   // jsdom 一类环境没有布局引擎，所有盒模型度量恒为 0。此时视口与遮挡判定会把一切
   // 都判成「不可见」，因此先探测一次，无布局时整体跳过这两项。
   const layout = hasLayout(doc, cache)
 
-  candidates.forEach(element => {
-    if (!isVisible(element, cache, layout)) return
+  /**
+   * 尝试把一个元素收录为可交互项。
+   *
+   * 抽成具名函数只为一件事：调用方需要知道**它有没有被收录**，从而决定要不要把它的
+   * 正文单独收进 {@link texts}。已收录元素的文本就是它的可访问名，再收一遍是重复。
+   */
+  function capture(element: Element): boolean {
     const role = roleOf(element, detectCursor, cache)
-    if (!role || !INTERACTIVE_ROLES.has(role)) return
-    if (layout && !isInViewport(element, expansion, cache)) return
-    if (layout && detectOcclusion && !isTopElement(element, cache)) return
+    if (!role || !INTERACTIVE_ROLES.has(role)) return false
+    if (layout && !isInViewport(element, expansion, cache)) return false
+    if (layout && detectOcclusion && !isTopElement(element, cache)) return false
 
     const name = accessibleName(element, cache)
-    // 纯容器不收录：它自己没有名字，模型无从辨识；而它包着的那些元素会各自被收录，
-    // 那才是该操作的目标。实测中侧边菜单的 `<ul>` / `<li>` 就属于这一类。
+    // 包着其他可交互元素的容器不收录——真正该操作的是里面那个，不是外面这层。
+    //
+    // **不能只在容器无名时才丢**。名字通常正是从后代文本算出来的，于是外层拿到了和
+    // 内层一模一样的名字，三层套娃全部逃逸。ant-design-vue 的单选实测：
+    //
+    //     <label class="ant-radio-wrapper">   cursor:pointer
+    //       <span class="ant-radio">          cursor:pointer
+    //         <input type="radio">
+    //       상담원 개인 설정
+    //
+    // 三层都被收录，同一个选项在清单里出现三次、名字完全相同——模型无从选择，清单
+    // 长度还膨胀三倍。
+    //
+    // **判据是「作者声明」还是「我们推断」**：
+    //
+    // - 显式 `role` 属性或原生可交互标签 —— 作者明确说了「这是一个操作目标」。
+    //   可展开菜单 `<li role="menuitem">系统管理<ul>…</ul></li>` 的父项点了会展开子菜单，
+    //   `<a href>` 里套 `<button>` 也是常见写法，丢掉就丢掉了这项能力。它们沿用旧规则：
+    //   只在自己没有名字时才当纯容器丢弃。
+    // - 仅靠 `cursor: pointer` 推断出来的 —— 上面那三层 AntD 包装正是这一类，`role`
+    //   属性一个都没有。推断与已收录的后代冲突时，推断让路。
     //
     // `scrollable` 豁免：它的价值恰恰在于「是个装着东西的容器」，模型要的是「这里
     // 还能往下/往右翻」这条信息，而不是它叫什么。真实表格实测——横向可滚 570px 的
     // `.el-table__body-wrapper` 因无自身文本被这条规则丢弃，右侧列对 Agent 永远不存在。
-    if (!name && role !== 'scrollable' && hasInteractiveDescendant(element, cache)) return
+    const declaredWidget = element.hasAttribute('role') ||
+      element.matches(SEMANTIC_LEAF_SELECTOR)
+    if (role !== 'scrollable' &&
+      (!declaredWidget || !name) &&
+      hasInteractiveDescendant(element, cache)) return false
 
-    // 层级：文档序遍历下，栈里留着的都是当前元素的祖先。逐个弹出不再包含它的，
-    // 剩余深度即为它在「被收录元素」这棵树里的层级。
-    while (ancestors.length > 0 &&
-      !ancestors[ancestors.length - 1].contains(element)) {
-      ancestors.pop()
-    }
+    // `<label>` 里的装饰元素：点它等于点那个控件，而控件本身已经在清单里了。
+    //
+    // `cursor` 是继承属性，所以整个 label 子树都会被推断成可点——文字、图标、
+    // 自定义样式层各自成项，同一个选项因此重复好几遍。上面那条规则拦不住它们：
+    // 它们是控件的**兄弟**，自身并不包含任何可交互后代。
+    //
+    // 判据取自 HTML 标准而非某个组件库：`<label>` 的语义就是「点我等于操作里面
+    // 那个控件」。声明式的操作目标（显式 role / 原生控件）不受影响。
+    if (isLabelDecoration(element, declaredWidget)) return false
 
     const snapshot: SnapshotElement = {
       index: snapshotElements.length,
@@ -306,19 +370,52 @@ export function capturePageWithElements(
     // `scrollable` 同样豁免：它天然无名无属性（见上一条豁免的理由），而 `name` 字段
     // 已在上面填了方向名，这里查的 `name` 仍是空串。
     if (!name && !attributes && role !== 'scrollable' &&
-      !element.matches(SEMANTIC_LEAF_SELECTOR)) return
+      !element.matches(SEMANTIC_LEAF_SELECTOR)) return false
     const context = rowContext(element, name)
     if (context) snapshot.context = context
     snapshotElements.push(snapshot)
     domElements.push(element)
-    ancestors.push(element)
+    ancestors.push({ element, name: snapshot.name })
+    return true
+  }
+
+  candidates.forEach(element => {
+    if (!isVisible(element, cache, layout)) return
+    // 层级：文档序遍历下，栈里留着的都是当前元素的祖先。逐个弹出不再包含它的，
+    // 剩余深度即为它在「被收录元素」这棵树里的层级。
+    //
+    // 必须在收录判定**之前**做：正文也要按这个深度缩进，放在 capture 内部的话，
+    // 未被收录的元素拿到的是上一个分支残留的深度。
+    while (ancestors.length > 0 &&
+      !ancestors[ancestors.length - 1].element.contains(element)) {
+      ancestors.pop()
+    }
+    if (capture(element)) return
+    // 未被收录的元素——容器、标题、单元格——它们的直接文本就是页面正文。
+    // 只取直接文本：取 textContent 会让每一层祖先都重复一遍整段内容。
+    const own = collapse(directText(element))
+    if (!own) return
+    // 已经被某个祖先当成可访问名用掉的文本不再重复收录。
+    if (ancestors.some(ancestor => ancestor.name.includes(own))) return
+    // 同理，`<label>` 里的文字就是那个控件的可访问名，已经跟在控件那一行了。
+    // 这里查不到它是因为 label 自己也被丢弃了，压根没进祖先栈。
+    if (isLabelDecoration(element, false)) return
+    // 这段文字属于某个「本该可交互、却被过滤掉」的元素时，一律不输出。
+    //
+    // 输出了反而更糟：模型看到「话单查询」四个字，以为那里能点，却在清单里找不到
+    // 对应索引，于是去猜一个邻近的下标——真实后台实测，它因此点了「数据报表」。
+    // 宁可让这一项对模型完全不存在，也不能给出一个够不到的承诺。
+    if (hasFilteredInteractiveAncestor(element, detectCursor, cache)) return
+    if (layout && !isInViewport(element, expansion, cache)) return
+    texts.push({ text: own, depth: ancestors.length, after: snapshotElements.length - 1 })
   })
 
   return {
     snapshot: {
       title: doc?.title ?? '',
       url: doc?.defaultView?.location.href ?? '',
-      elements: snapshotElements
+      elements: snapshotElements,
+      texts
     },
     elements: domElements
   }
@@ -386,11 +483,28 @@ function isTopElement(element: Element, cache: MeasureCache): boolean {
   if (rect.width === 0 && rect.height === 0) return false
 
   const inset = 1
-  const points: Array<[number, number]> = [
+  const candidatePoints: Array<[number, number]> = [
     [rect.left + rect.width / 2, rect.top + rect.height / 2],
     [rect.left + inset, rect.top + inset],
     [rect.right - inset, rect.bottom - inset]
   ]
+
+  // 只保留真正落在视口内的取样点。
+  //
+  // `elementsFromPoint` 的坐标一旦超出视口就恒返回空，此时「命中栈里没有它」并不
+  // 说明被遮挡，只说明这个点压根测不了。而视口过滤是带外扩的（见
+  // {@link CaptureOptions.viewportExpansion}），刚好滚出边缘一点的元素本就被有意
+  // 收录——真实后台实测：侧边栏「话单查询」在 top=812、视口高 812，靠外扩收进来，
+  // 却被这条判成遮挡而整项消失，模型只看得到它的文字、点不到它。
+  const view = doc.defaultView
+  const width = view?.innerWidth ?? 0
+  const height = view?.innerHeight ?? 0
+  const points = view
+    ? candidatePoints.filter(([x, y]) => x >= 0 && y >= 0 && x < width && y < height)
+    : candidatePoints
+  // 整个元素都在视口之外：无从判定，按未遮挡处理。它点不到是因为要先滚动，
+  // 而不是因为被盖住——两者的正确应对完全不同。
+  if (points.length === 0) return true
 
   return points.some(([x, y]) => {
     // 先试单点：绝大多数元素本来就在栈顶，这条几乎总是命中，代价也最低。
@@ -427,22 +541,43 @@ export function capturePage(
  * 一行一个元素，索引在最前——模型选中后回传的就是这个下标，因此它必须显眼且稳定。
  */
 export function formatSnapshot(snapshot: PageSnapshot): string {
-  if (snapshot.elements.length === 0) return '(当前页面没有可交互元素)'
-  return snapshot.elements.map(element => {
-    // 缩进表达层级；`*` 表示相对上次抓取新出现，直接回答「刚才那次操作造成了什么」。
-    const indent = '  '.repeat(element.depth)
-    const marker = element.isNew ? '*' : ''
-    const parts = [`${indent}${marker}[${element.index}]`, element.role]
-    if (element.name) parts.push(element.name)
-    if (element.value) parts.push(`= "${element.value}"`)
-    // 行上下文用括号跟在后面：一屏五个「删除」全靠它区分。
-    if (element.context) parts.push(`(${element.context})`)
-    if (element.checked) parts.push('(checked)')
-    // 只读要明确告诉模型：它唯一能做的是点击，不要试图往里打字。
-    if (element.readonly) parts.push('(readonly)')
-    if (element.disabled) parts.push('(disabled)')
-    return parts.join(' ')
-  }).join('\n')
+  const texts = snapshot.texts ?? []
+  if (snapshot.elements.length === 0 && texts.length === 0) {
+    return '(当前页面没有可交互元素)'
+  }
+
+  // 正文按文档序插回元素之间。堆成单独一段会丢掉「这段文字属于哪一行」，而那正是
+  // 模型读懂表格与卡片的依据。不带索引则是刻意的：正文点不了，给了索引反而诱导点击。
+  const textsAfter = new Map<number, string[]>()
+  texts.forEach(block => {
+    const line = `${'  '.repeat(block.depth)}${block.text}`
+    const bucket = textsAfter.get(block.after)
+    if (bucket) bucket.push(line)
+    else textsAfter.set(block.after, [line])
+  })
+
+  const lines: string[] = [...(textsAfter.get(-1) ?? [])]
+  snapshot.elements.forEach(element => {
+    lines.push(formatElement(element))
+    lines.push(...(textsAfter.get(element.index) ?? []))
+  })
+  return lines.join('\n')
+}
+
+function formatElement(element: SnapshotElement): string {
+  // 缩进表达层级；`*` 表示相对上次抓取新出现，直接回答「刚才那次操作造成了什么」。
+  const indent = '  '.repeat(element.depth)
+  const marker = element.isNew ? '*' : ''
+  const parts = [`${indent}${marker}[${element.index}]`, element.role]
+  if (element.name) parts.push(element.name)
+  if (element.value) parts.push(`= "${element.value}"`)
+  // 行上下文用括号跟在后面：一屏五个「删除」全靠它区分。
+  if (element.context) parts.push(`(${element.context})`)
+  if (element.checked) parts.push('(checked)')
+  // 只读要明确告诉模型：它唯一能做的是点击，不要试图往里打字。
+  if (element.readonly) parts.push('(readonly)')
+  if (element.disabled) parts.push('(disabled)')
+  return parts.join(' ')
 }
 
 /**
@@ -875,4 +1010,45 @@ function directText(element: Element): string {
 /** 折叠连续空白。多行文本原样进快照会迅速把 token 预算吃光。 */
 function collapse(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
+}
+
+
+/**
+ * 这个元素是否位于一个「本该被收录、却被过滤掉」的可交互元素之内。
+ *
+ * 用于决定它的文本要不要作为正文输出，理由见调用处。只向上找有限层：菜单项、
+ * 按钮这类结构都很浅，无限上溯会把整页正文都判成属于某个祖先容器。
+ */
+function hasFilteredInteractiveAncestor(
+  element: Element,
+  detectCursor: boolean,
+  cache: MeasureCache
+): boolean {
+  let current: Element | null = element.parentElement
+  for (let depth = 0; depth < 3 && current; depth += 1) {
+    const role = roleOf(current, detectCursor, cache)
+    if (role && INTERACTIVE_ROLES.has(role)) return true
+    current = current.parentElement
+  }
+  return false
+}
+
+
+/**
+ * 这个元素是不是某个 `<label>` 内部的装饰层。
+ *
+ * `cursor` 是继承属性，整个 label 子树都会被推断成可点：文字、图标、组件库的自定义
+ * 样式层各自成项，同一个选项因此重复好几遍。而点它们的效果与点那个控件完全一致，
+ * 控件本身又已经在清单里了。
+ *
+ * 判据取自 HTML 标准而非某个组件库：`<label>` 的语义就是「点我等于操作里面那个控件」。
+ *
+ * @param declaredWidget 作者显式声明的操作目标（有 `role` 或原生控件）永不算装饰。
+ */
+function isLabelDecoration(element: Element, declaredWidget: boolean): boolean {
+  if (declaredWidget) return false
+  const label = element.closest('label')
+  return Boolean(
+    label && label !== element && label.querySelector('input,select,textarea')
+  )
 }
