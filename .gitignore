@@ -11,3 +11,7 @@ coverage/
 # 编辑器
 .idea/
 .vscode/
+
+# E2E 产物（快照、控制台日志）。每次跑都会重生成，且体积随次数增长。
+.playwright-mcp/
+.playwright/
