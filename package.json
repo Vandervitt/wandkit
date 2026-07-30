@@ -17,7 +17,9 @@
     "example:llm": "vite-node examples/02-real-llm.ts",
     "example:page": "vite-node examples/03-page-executor.ts",
     "example:chat": "vite-node examples/04-chat-standalone.ts",
-    "example:interceptor": "vite-node examples/05-interceptor.ts"
+    "example:interceptor": "vite-node examples/05-interceptor.ts",
+    "example:page-prompt": "vite-node examples/06-page-agent-prompt.ts",
+    "llm-proxy": "node examples/llm-proxy.mjs"
   },
   "devDependencies": {
     "@sinclair/typebox": "^0.31.30",
