@@ -859,7 +859,31 @@ describe('AgentRuntime', () => {
     expect(result.status).toBe('completed')
   })
 
-  it('最多请求模型 6 轮', async() => {
+  /**
+   * 缺省不设轮次上限。
+   *
+   * 曾经默认 6 轮。在页面原语模式下，一次「新建员工」有二十来个动作，Run 必然在
+   * 做到一半时被判 failed——用户看到的是助手点了两下就停下来让他自己接着点。上限
+   * 拦不住真正该拦的东西（那是超时和 stop 的职责），只拦住了正常的长任务。
+   */
+  it('缺省不限制轮次，长任务可以一路跑到自然结束', async() => {
+    readExecute.mockResolvedValue({ ok: true, message: 'ok' })
+    const replies = Array.from({ length: 30 }, (_, index) => toolReply({
+      id: 'round-' + index,
+      name: 'gateway_query_v1',
+      args: '{"keyword":"x"}'
+    }))
+    replies.push(finalReply('查完了'))
+    const llm = new FakeLlm(replies)
+    const { runtime } = createRuntime(llm)
+
+    const result = await runtime.start('循环查询')
+
+    expect(result.status).toBe('completed')
+    expect(llm.requests).toHaveLength(31)
+  })
+
+  it('显式配置轮次上限时仍然生效', async() => {
     readExecute.mockResolvedValue({ ok: true, message: 'ok' })
     const replies = Array.from({ length: 6 }, (_, index) => toolReply({
       id: 'round-' + index,
@@ -867,7 +891,7 @@ describe('AgentRuntime', () => {
       args: '{"keyword":"x"}'
     }))
     const llm = new FakeLlm(replies)
-    const { runtime } = createRuntime(llm)
+    const { runtime } = createRuntime(llm, {}, { maxRounds: 6 })
 
     const result = await runtime.start('循环查询')
 
@@ -882,12 +906,29 @@ describe('AgentRuntime', () => {
     expect(toolCallIds.filter(id => id === 'round-5')).toHaveLength(1)
   })
 
-  it('每个 Run 最多处理 12 个工具调用', async() => {
+  it('缺省不限制工具调用次数', async() => {
     readExecute.mockResolvedValue({ ok: true, message: 'ok' })
     const calls = Array.from({ length: 13 }, (_, index) => ({
       id: 'call-' + index, name: 'gateway_query_v1', args: '{"keyword":"x"}'
     }))
-    const { runtime, execute } = createRuntime(new FakeLlm([toolReply(...calls)]))
+    const { runtime, execute } = createRuntime(
+      new FakeLlm([toolReply(...calls), finalReply('都执行完了')])
+    )
+
+    const result = await runtime.start('执行很多工具')
+
+    expect(result.status).toBe('completed')
+    expect(execute).toHaveBeenCalledTimes(13)
+  })
+
+  it('显式配置工具调用上限时仍然生效', async() => {
+    readExecute.mockResolvedValue({ ok: true, message: 'ok' })
+    const calls = Array.from({ length: 13 }, (_, index) => ({
+      id: 'call-' + index, name: 'gateway_query_v1', args: '{"keyword":"x"}'
+    }))
+    const { runtime, execute } = createRuntime(
+      new FakeLlm([toolReply(...calls)]), {}, { maxToolCalls: 12 }
+    )
 
     const result = await runtime.start('执行很多工具')
 
@@ -898,10 +939,13 @@ describe('AgentRuntime', () => {
     }))
   })
 
-  it('Run 超过 60 秒后确定性停止', async() => {
+  // 超时是取消了次数上限之后唯一的自动兜底，因此这条必须一直有效。时长写死在用例里
+  // 而不是依赖默认值：默认值是可以随产品形态调整的，这条断言要测的是机制本身。
+  it('Run 超过时长上限后确定性停止', async() => {
     let clockReads = 0
     const llm = new FakeLlm([finalReply()])
     const { runtime } = createRuntime(llm, {}, {
+      runTimeoutMs: 60000,
       now: () => clockReads++ === 0 ? 0 : 60001
     })
 

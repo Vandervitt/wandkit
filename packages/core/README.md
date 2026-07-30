@@ -136,9 +136,11 @@ await runtime.start('把张三这个用户删掉')
 ```ts
 new AgentRuntime(deps, {
   messages: { writeStateUnknown: 'Request sent, outcome unknown — do not retry.' },
-  maxRounds: 6,
-  maxToolCalls: 12,
-  runTimeoutMs: 60_000
+  // 轮次与工具调用次数缺省不限制：多步页面任务动辄二十来步，次数上限只会
+  // 在做到一半时把 Run 判死。兜底交给时长上限和用户的 stop()。
+  maxRounds: 20,
+  maxToolCalls: 40,
+  runTimeoutMs: 600_000
 })
 
 createPromptComposer({ systemPrompt: MY_PROMPT, timeZone: 'Europe/Berlin' })

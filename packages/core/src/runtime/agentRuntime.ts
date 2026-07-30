@@ -105,8 +105,25 @@ export interface AgentRuntimeDependencies {
 }
 
 export interface AgentRuntimeOptions {
+  /**
+   * 单个 Run 最多请求模型多少轮，**缺省不限制**。
+   *
+   * 曾经默认 6。页面原语模式下一次「新建员工」有二十来个动作，Run 必然在做到一半时
+   * 被判 failed——用户看到的是助手点了两下就停下来让他自己接着点。次数上限拦不住真正
+   * 该拦的东西（模型空转由 {@link runTimeoutMs} 和用户 `stop()` 兜底），却精确地拦住了
+   * 正常的长任务。
+   *
+   * 仍然可以显式配置：给 0 即「一轮都不许跑」。
+   */
   maxRounds?: number
+  /** 单个 Run 最多执行多少次工具调用，**缺省不限制**。理由同 {@link maxRounds}。 */
   maxToolCalls?: number
+  /**
+   * 单个 Run 的总时长上限，缺省 10 分钟。
+   *
+   * 这是没有次数上限之后**唯一的自动兜底**，因此不能设得太紧：多步页面操作每一步都
+   * 是一次模型往返，原来的 60 秒连一次表单填写都跑不完。
+   */
   runTimeoutMs?: number
   now?: () => number
   traces?: TraceCollector
@@ -235,9 +252,11 @@ export class AgentRuntime {
     private readonly dependencies: AgentRuntimeDependencies,
     options: AgentRuntimeOptions = {}
   ) {
-    this.maxRounds = options.maxRounds ?? 6
-    this.maxToolCalls = options.maxToolCalls ?? 12
-    this.runTimeoutMs = options.runTimeoutMs ?? 60000
+    // 缺省不设次数上限，见 {@link AgentRuntimeOptions.maxRounds}。宿主显式给了数字
+    // 就照数字来（包括 0）——`?? Infinity` 而非 `|| Infinity`，0 是一个有意义的配置。
+    this.maxRounds = options.maxRounds ?? Infinity
+    this.maxToolCalls = options.maxToolCalls ?? Infinity
+    this.runTimeoutMs = options.runTimeoutMs ?? 600000
     this.now = options.now ?? Date.now
     this.messages = resolveMessages(options.messages)
     this.maxCandidateModules = options.maxCandidateModules ?? MAX_CANDIDATE_MODULES
