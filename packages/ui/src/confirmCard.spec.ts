@@ -59,6 +59,17 @@ describe('确认卡片', () => {
       expect(root.querySelector('[part="card"]')?.getAttribute('data-risk'))
         .toBe('destructive')
     })
+
+    it('危险等级以真实文本渲染，两种风险都有', () => {
+      // 做成 CSS 的 ::before content 会被宿主用 ::part() 覆盖掉，
+      // 而危险标识没有关闭开关。
+      const destructive = shadow(createCard({ risk: 'destructive' }))
+      expect(destructive.querySelector('[part="risk"]')?.textContent)
+        .toContain('破坏性操作')
+
+      const write = shadow(createCard({ risk: 'write' }))
+      expect(write.querySelector('[part="risk"]')?.textContent).toBe('写操作')
+    })
   })
 
   describe('原始请求即地面真相', () => {

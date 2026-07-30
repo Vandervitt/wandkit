@@ -112,6 +112,18 @@ describe('交互遮罩', () => {
       expect(mask().textContent).not.toContain('第一步')
     })
 
+    it('无文案时整个状态胶囊隐藏，不剩一颗孤立的状态点', () => {
+      const m = new InteractionMask()
+      m.arm()
+
+      const status = mask().querySelector<HTMLElement>('[part="status"]')!
+      expect(status.hidden).toBe(true)
+      expect(mask().querySelector('[part="dot"]')).not.toBeNull()
+
+      m.setLabel('执行中')
+      expect(status.hidden).toBe(false)
+    })
+
     it('透明模式仍然拦截交互，只是不遮挡视线', () => {
       // 用户需要看清 Agent 在页面上做了什么，遮挡会让操作变成黑箱。
       const m = new InteractionMask({ transparent: true })
