@@ -230,6 +230,148 @@ describe('PageController —— 复合下拉（组件库）', () => {
     await expect(controller.select(0, '不存在')).rejects.toThrow(/管理员、坐席/)
   })
 
+  /**
+   * rc-select（Ant Design Vue / React 的下拉底座）把展开监听挂在 `mousedown` 上，
+   * 而不是 `click`。`element.click()` 只派发 click，浮层根本不会打开——扫不到任何
+   * `role="option"`，于是报「点开后没有可选项」，模型把它转述成「这不是下拉框」。
+   *
+   * 这不是 Role 字段一个补丁：依赖 mousedown 的组件（下拉、日期选择、级联、
+   * 自定义弹出层）都会死在同一个地方。
+   */
+  it('只监听 mousedown 的下拉也能打开（rc-select / AntD）', async () => {
+    const picked: string[] = []
+    render('<input readonly role="combobox" aria-label="Role">')
+    const trigger = document.querySelector('input') as HTMLInputElement
+    // 刻意只听 mousedown：监听 click 的话这条用例就退化成上面那些，测不到东西。
+    trigger.addEventListener('mousedown', () => {
+      const popup = document.createElement('div')
+      popup.setAttribute('role', 'listbox')
+      const option = document.createElement('div')
+      option.setAttribute('role', 'option')
+      option.textContent = '坐席'
+      option.addEventListener('mousedown', () => {
+        picked.push('坐席')
+        trigger.value = '坐席'
+        popup.remove()
+      })
+      popup.appendChild(option)
+      document.body.appendChild(popup)
+    })
+    const controller = new PageController()
+    controller.capture()
+
+    await controller.select(0, '坐席')
+
+    expect(picked).toEqual(['坐席'])
+  })
+
+  /**
+   * rc-select 的真实结构：`role="combobox"` 在**内层** input 上，外层是
+   * `.ant-select-selector`；浮层则 `position: absolute` 挂在 body 末尾，与触发器
+   * 在 DOM 上毫无父子关系。
+   *
+   * 快照收录的往往是外层那个（它才是有尺寸、看得见的那块），因此按索引拿到的元素
+   * 身上既没有 `aria-expanded` 也没有 `aria-controls`。浮层与触发器不相邻这一点也
+   * 决定了：搜集选项不能从触发器往下找，只能全局找。
+   */
+  it('触发器是外层包装、浮层挂在 body 上时同样可选（rc-select 真实结构）', async () => {
+    const picked: string[] = []
+    render(`
+      <div class="ant-select-selector" tabindex="0">
+        <input type="search" role="combobox" readonly aria-expanded="false"
+               aria-controls="rc_select_3_list" aria-label="Role">
+        <span>Please select</span>
+      </div>
+    `)
+    const selector = document.querySelector('.ant-select-selector') as HTMLElement
+    selector.addEventListener('mousedown', () => {
+      const popup = document.createElement('div')
+      // 与触发器同级挂在 body 末尾，而不是嵌在它内部——这是 absolute 浮层的常态。
+      popup.id = 'rc_select_3_list'
+      popup.setAttribute('role', 'listbox')
+      ;['管理员', '坐席'].forEach(text => {
+        const option = document.createElement('div')
+        option.setAttribute('role', 'option')
+        option.textContent = text
+        option.addEventListener('mousedown', () => {
+          picked.push(text)
+          popup.remove()
+        })
+        popup.appendChild(option)
+      })
+      document.body.appendChild(popup)
+    })
+    const controller = new PageController()
+    const snapshot = controller.capture()
+    const index = snapshot.elements.findIndex(
+      element => element.name === 'Role' || element.role === 'combobox'
+    )
+
+    await controller.select(index, '坐席')
+
+    expect(picked).toEqual(['坐席'])
+  })
+
+  /**
+   * rc-select 的选项**没有 `role="option"`**。
+   *
+   * 真实页面实测（AntD Vue 4）：`aria-controls` 指向的 `rc_select_N_list` 是一个纯
+   * 无障碍镜像——里面 4 个 `role="option"` 全是空文本、不可见、无 class 的占位 div，
+   * 只用于 `aria-activedescendant`。真正的可见选项是 `.ant-select-item-option`，
+   * 挂在另一棵 `.ant-select-dropdown` 树上，**不带任何 role**。
+   *
+   * 于是「认 role=option」这条契约恰好命中了诱饵：扫到 4 个空节点，可见性一过滤就
+   * 全没了，报「点开后也没有可选项」。模型连试四次后放弃，转头去点了别的元素。
+   *
+   * 结论：选项不能靠属性契约找，只能靠「点开之后新出现、且看得见、且可点」——
+   * 这正是快照本来就在算的东西。
+   */
+  it('选项没有 role=option 时，靠「新出现的可点元素」找到它', async () => {
+    const picked: string[] = []
+    render('<div class="trigger" style="cursor:pointer" aria-label="Role">Please select</div>')
+    const trigger = document.querySelector('.trigger') as HTMLElement
+    trigger.addEventListener('mousedown', () => {
+      const popup = document.createElement('div')
+      // 无障碍镜像：空文本、不可见，正是 rc-select 会摆在 aria-controls 后面的东西。
+      const mirror = document.createElement('div')
+      mirror.style.display = 'none'
+      ;['', ''].forEach(() => {
+        const ghost = document.createElement('div')
+        ghost.setAttribute('role', 'option')
+        mirror.appendChild(ghost)
+      })
+      document.body.appendChild(mirror)
+      // 真正的选项：有文本、可点，但没有 role。
+      ;['管理员', '坐席'].forEach(text => {
+        const item = document.createElement('div')
+        // 无 role、无 tabindex，只有一个 cursor: pointer——这正是
+        // `.ant-select-item-option` 在真实浏览器里的样子。
+        item.style.cursor = 'pointer'
+        item.textContent = text
+        item.addEventListener('mousedown', () => {
+          picked.push(text)
+          popup.remove()
+        })
+        popup.appendChild(item)
+      })
+      document.body.appendChild(popup)
+    })
+    const controller = new PageController()
+    controller.capture()
+
+    await controller.select(0, '坐席')
+
+    expect(picked).toEqual(['坐席'])
+  })
+
+  it('点开后确实没有任何选项时，报告实情而不是硬说「不是下拉框」', async () => {
+    render('<button>普通按钮</button>')
+    const controller = new PageController()
+    controller.capture()
+
+    await expect(controller.select(0, '坐席')).rejects.toThrow(/没有出现任何可选项/)
+  })
+
   it('隐藏的浮层选项不参与匹配', async () => {
     // 组件库常把上一个下拉的浮层留在 DOM 里只做隐藏。拿它来匹配会点到一个用户
     // 看不见的选项上，而工具照样报成功——比选不中危险得多。
@@ -242,7 +384,7 @@ describe('PageController —— 复合下拉（组件库）', () => {
     const controller = new PageController()
     controller.capture()
 
-    await expect(controller.select(0, '陈旧选项')).rejects.toThrow(/没有可选项|陈旧选项/)
+    await expect(controller.select(0, '陈旧选项')).rejects.toThrow(/没有出现任何可选项/)
   })
 })
 

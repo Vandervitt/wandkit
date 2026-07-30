@@ -119,6 +119,32 @@ export class PageController {
     return formatSnapshot(await this.captureStable(root))
   }
 
+  /**
+   * 当前页面上可见的表单校验错误。
+   *
+   * **它存在的理由是杜绝假成功。** 真实接入实测：模型填完表单点了「OK」，点击本身
+   * 确实发生了，工具回报 `已点击「OK」`——模型据此宣布「已成功添加新员工」。而实际上
+   * 密码不符合规则、角色没选，表单被前端校验拦下，一个请求都没发出去。用户看到的是
+   * 一句自信的成功，和一个红着两处错误、什么也没提交的弹窗。
+   *
+   * 判据是 `role="alert"` **且位于 `<form>` 之内**，两个条件缺一不可：
+   *
+   * - `role="alert"` 是 ARIA 给校验反馈的标准角色，AntD、Element Plus 等都遵守它，
+   *   比绑 `.ant-form-item-explain-error` 这类 class 名健壮得多（真实页面实测确认
+   *   AntD Vue 4 用的正是它；`aria-invalid` 它反而不设，因此那条路走不通）。
+   * - **必须限定在表单内**：成功提示（`.ant-message` 之流）同样用 `role="alert"`，
+   *   但挂在 body 上、不在任何表单里。不加这层限制，一次成功的保存会被判成失败。
+   */
+  validationErrors(): string[] {
+    if (typeof document === 'undefined') return []
+    return Array.from(document.querySelectorAll('[role="alert"]'))
+      .filter(alert => alert.closest('form') && isElementVisible(alert))
+      .map(alert => collapseText(alert.textContent ?? ''))
+      .filter(text => text !== '')
+      // 同一条错误常被内外两层节点各渲染一遍（AntD 就是 explain / explain-error 两层）。
+      .filter((text, index, all) => all.indexOf(text) === index)
+  }
+
   /** 停止路由侦测并还原被包装的 history 方法。 */
   dispose(): void {
     this.routeWatcher?.stop()
@@ -145,7 +171,7 @@ export class PageController {
   click(index: number): void {
     const element = this.elementAt(index)
     assertEnabled(element)
-    ;(element as HTMLElement).click()
+    pressAndClick(element as HTMLElement)
   }
 
   input(index: number, text: string): void {
@@ -187,55 +213,56 @@ export class PageController {
   }
 
   /**
-   * 复合下拉：点开触发器 → 在浮层里按可见文本点中选项。
+   * 复合下拉：点开触发器 → 在**新出现的可点元素**里按可见文本点中选项。
    *
-   * 认 `role="option"` 而不认各家 class 名。ARIA 角色是组件库共同遵守的契约，绑
-   * class 名等于每接一个新 UI 库就得改一次代码。
+   * **刻意不认 `role="option"`，也不信 `aria-controls`。** 真实页面实测
+   * （AntD Vue 4 / rc-select）：`aria-controls` 指向的 `rc_select_N_list` 是一棵纯
+   * 无障碍镜像——里面的 `role="option"` 全是空文本、不可见、无 class 的占位 div，
+   * 只服务于 `aria-activedescendant`；真正的可见选项是 `.ant-select-item-option`，
+   * 长在另一棵 `.ant-select-dropdown` 上，**不带任何 role**。
+   *
+   * 于是「认 role=option」这条契约恰好命中诱饵：扫到一把空节点，可见性一过滤就全没
+   * 了，报「点开后也没有可选项」。模型连试四次后放弃了整个字段。
+   *
+   * 改判据为「点开之后新出现、看得见、可点、有名字」——这正是快照本来就在算的东西
+   * （可见性、遮挡、`cursor: pointer` 兜底、`isNew` 标注）。复用它既不必为每家 UI 库
+   * 单写适配，也自动继承后续所有快照层面的改进。
    */
   private async selectFromPopup(trigger: Element, optionText: string): Promise<void> {
-    if (trigger.getAttribute('aria-expanded') !== 'true') {
-      ;(trigger as HTMLElement).click()
+    if (!isExpanded(trigger)) {
+      pressAndClick(trigger as HTMLElement)
       // 浮层普遍是异步挂载的，立刻查会一无所获。
       await waitForDomStable(this.options.stable)
     }
 
-    const options = this.popupOptions(trigger)
-    if (options.length === 0) {
+    const snapshot = this.capture()
+    const captured = this.captured ?? []
+    const pool = snapshot.elements
+      .map((meta, index) => ({ meta, dom: captured[index] }))
+      // 触发器自身及其内部元素排除掉：点回触发器只会把刚打开的浮层收起来。
+      .filter(item => item.dom && item.dom !== trigger && !trigger.contains(item.dom))
+      .filter(item => item.meta.name)
+
+    // 优先只在「新出现的」里找。页面别处很可能本来就有同名文字（表格里的角色列就是
+    // 一例），不加这层限制会点到浮层外面去，而工具照样回报成功。
+    const fresh = pool.filter(item => item.meta.isNew)
+    const matched = pickOption(fresh, optionText) ?? pickOption(pool, optionText)
+    if (matched) {
+      pressAndClick(matched.dom as HTMLElement)
+      // 选中后浮层收起、表单值回填都可能是异步的。等稳定再交还，随后的快照才是终态。
+      await waitForDomStable(this.options.stable)
+      return
+    }
+
+    // 报错要说实话，且必须区分这两种情况——它们的下一步完全不同：点开了但没这一项，
+    // 模型该改选别的；压根没弹出任何东西，模型该去确认这元素究竟是不是下拉框。
+    if (fresh.length === 0) {
       throw new PageActionError(
-        `索引处的元素不是下拉框，点开后也没有可选项（${trigger.tagName.toLowerCase()}）`
+        `点开索引处的元素后没有出现任何可选项，它可能不是下拉框（${trigger.tagName.toLowerCase()}）`
       )
     }
-
-    const matched = options.find(option => optionLabel(option) === optionText)
-      // 组件库常在选项里塞图标、勾选标记一类的附加文本，精确匹配会漏掉本该命中的项。
-      // 精确优先、包含兜底：反过来会让「坐席」抢先匹配到「坐席组长」。
-      ?? options.find(option => optionLabel(option).includes(optionText))
-    if (!matched) {
-      const available = options.map(optionLabel).join('、')
-      throw new PageActionError(`没有名为「${optionText}」的选项。可选：${available}`)
-    }
-
-    ;(matched as HTMLElement).click()
-    // 选中后浮层收起、表单值回填，都可能是异步的。等稳定再交还，随后的快照才是终态。
-    await waitForDomStable(this.options.stable)
-  }
-
-  /**
-   * 收集浮层中当前可选的项。
-   *
-   * 两处过滤都不能省：
-   * - **可见性**——组件库常把上一个下拉的浮层留在 DOM 里只做隐藏。拿它匹配会点到
-   *   用户根本看不见的选项上，而工具照样回报成功，比选不中危险得多。
-   * - **禁用**——`aria-disabled` 的项点了没有任何效果，同样是假成功。
-   */
-  private popupOptions(trigger: Element): Element[] {
-    const doc = trigger.ownerDocument
-    // 触发器显式指向某个浮层时优先用它：页面上同时开着多个下拉时，全局搜集会串台。
-    const ownedId = trigger.getAttribute('aria-controls') ?? trigger.getAttribute('aria-owns')
-    const scope = (ownedId && doc.getElementById(ownedId)) || doc
-    const found = Array.from(scope.querySelectorAll('[role="option"]'))
-    return found.filter(
-      option => isElementVisible(option) && option.getAttribute('aria-disabled') !== 'true'
+    throw new PageActionError(
+      `没有名为「${optionText}」的选项。可选：${fresh.map(item => item.meta.name).join('、')}`
     )
   }
 
@@ -337,6 +364,31 @@ export class PageController {
   }
 }
 
+/**
+ * 派发一次完整的指针按下—抬起—点击序列。
+ *
+ * **不能只调 `element.click()`**：那只派发 `click` 事件。真实组件库大量把交互挂在
+ * `mousedown` 上——rc-select（Ant Design Vue / React 的下拉底座）就是如此，它的展开
+ * 监听在 `mousedown`，`click()` 打不开浮层。真实接入实测：新建员工表单的「角色」
+ * 字段点不开，扫不到任何 `role="option"`，模型于是回答「这不是下拉框」。
+ *
+ * 这不是给下拉打的补丁：日期选择、级联、自定义弹出层同样常用 mousedown（为了抢在
+ * 焦点转移之前响应）。按真实用户的事件序列来，才对所有这些一并成立。
+ *
+ * 末尾仍调 `click()` 而不是自己派发 `click` 事件：原生 `click()` 会带上表单提交、
+ * 复选框勾选这些浏览器默认行为，手工构造的事件没有。
+ */
+function pressAndClick(element: HTMLElement): void {
+  const init = { bubbles: true, cancelable: true, composed: true }
+  element.dispatchEvent(new MouseEvent('pointerdown', init))
+  element.dispatchEvent(new MouseEvent('mousedown', init))
+  // 焦点跟随按下发生。缺了它，「失焦即关闭」的浮层会在随后的抬起中立刻收起。
+  if (typeof element.focus === 'function') element.focus()
+  element.dispatchEvent(new MouseEvent('pointerup', init))
+  element.dispatchEvent(new MouseEvent('mouseup', init))
+  element.click()
+}
+
 function selectNative(select: HTMLSelectElement, optionText: string): void {
   const options = Array.from(select.options)
   const matched = options.find(option => option.textContent?.trim() === optionText)
@@ -348,9 +400,31 @@ function selectNative(select: HTMLSelectElement, optionText: string): void {
   select.dispatchEvent(new Event('change', { bubbles: true }))
 }
 
-/** 选项的可见文本。优先 `aria-label`：图标型选项的 `textContent` 可能是空的。 */
-function optionLabel(option: Element): string {
-  return (option.getAttribute('aria-label') ?? option.textContent ?? '').trim()
+/** 折叠空白，供错误文案去掉换行与缩进后再比对去重。 */
+function collapseText(raw: string): string {
+  return raw.replace(/\s+/g, ' ').trim()
+}
+
+/**
+ * 下拉是否已经展开。
+ *
+ * 三处都要查：模型点中的可能是外层包装（`.ant-select-selector`），也可能是内层那个
+ * `role="combobox"` 的 input，而 `aria-expanded` 只挂在其中一个上。判错的代价是把
+ * 刚打开的浮层又点关掉。
+ */
+function isExpanded(trigger: Element): boolean {
+  return trigger.getAttribute('aria-expanded') === 'true' ||
+    !!trigger.querySelector('[aria-expanded="true"]') ||
+    !!trigger.closest('[aria-expanded="true"]')
+}
+
+/** 精确名字优先，包含兜底——反过来会让「坐席」抢先匹配到「坐席组长」。 */
+function pickOption<T extends { meta: { name: string } }>(
+  items: T[],
+  optionText: string
+): T | undefined {
+  return items.find(item => item.meta.name === optionText)
+    ?? items.find(item => item.meta.name.includes(optionText))
 }
 
 function isTextInput(element: Element): boolean {
