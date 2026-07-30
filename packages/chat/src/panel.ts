@@ -61,6 +61,17 @@ const STYLE = `
 [part="status-dot"] {
   width: 6px; height: 6px; border-radius: 50%; background: currentColor;
 }
+
+[part~="action"] {
+  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; cursor: pointer;
+  border: 0; border-radius: 8px; background: transparent; color: var(--_dim);
+  transition: background .14s ease, color .14s ease;
+}
+[part~="action"]:hover:not(:disabled) { background: rgba(15, 23, 41, .07); color: var(--_fg); }
+[part~="action"]:focus-visible { outline: 2px solid var(--_accent); outline-offset: -1px; }
+[part~="action"]:disabled { opacity: .32; cursor: default; }
+[part~="action"] svg { width: 15px; height: 15px; }
 [part="status"][data-status="busy"] [part="status-dot"],
 [part="status"][data-status="awaiting_confirmation"] [part="status-dot"] {
   animation: tal-pulse 1.8s ease-in-out infinite;
@@ -226,6 +237,19 @@ const PLACEHOLDER: Record<ChatStatus, string> = {
   awaiting_confirmation: '请先处理上方的确认卡片'
 }
 
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
+/**
+ * 标题栏动作图标。
+ *
+ * 新建对话用垃圾桶而不是加号：这个动作的**代价**是清掉当前这段会话，而加号只说了得到
+ * 什么、没说失去什么。用户在这里犹豫一下是好事。
+ */
+const ACTION_ICONS = {
+  'new-chat': ['M4 6.5h12', 'M8 6.5V4.8h4v1.7', 'M6 6.5l.8 8.2h6.4l.8-8.2'],
+  close: ['M5.5 5.5l9 9', 'M14.5 5.5l-9 9']
+}
+
 /** 判定「贴底」的容差。用户往回翻历史时不该被新消息拽回去。 */
 const BOTTOM_SLACK = 40
 
@@ -271,6 +295,7 @@ export class ToolairlockChatPanel extends HTMLElement {
   private errorBox!: HTMLElement
   private input!: HTMLTextAreaElement
   private sendButton!: HTMLButtonElement
+  private newChatButton!: HTMLButtonElement
   private built = false
 
   constructor() {
@@ -346,7 +371,14 @@ export class ToolairlockChatPanel extends HTMLElement {
     this.statusLabel = document.createElement('span')
     this.statusNode.append(dot, this.statusLabel)
 
-    header.append(this.headingNode, spacer, this.statusNode)
+    // 新建在左、关闭在右：关闭是最靠边、最不容易误触到别的东西的位置，符合窗口类
+    // 界面的通用位置约定。
+    this.newChatButton = this.buildAction('new-chat', '新建对话')
+    const closeButton = this.buildAction('close', '关闭助手')
+
+    header.append(
+      this.headingNode, spacer, this.statusNode, this.newChatButton, closeButton
+    )
 
     this.progress = document.createElement('div')
     this.progress.setAttribute('part', 'progress')
@@ -356,6 +388,40 @@ export class ToolairlockChatPanel extends HTMLElement {
 
     fragment.append(header, this.progress)
     return fragment
+  }
+
+  /**
+   * 标题栏上的一个动作按钮。
+   *
+   * 两个动作都**只派发事件，不自己动手**——面板不持有状态，清空会话得由持有它的一方
+   * 来做；收起与否更是壳的事，面板不该知道自己被装在什么里面。
+   */
+  private buildAction(name: 'new-chat' | 'close', label: string): HTMLButtonElement {
+    const button = document.createElement('button')
+    button.setAttribute('part', `action ${name}`)
+    button.type = 'button'
+    button.setAttribute('aria-label', label)
+    button.title = label
+
+    const svg = document.createElementNS(SVG_NS, 'svg')
+    svg.setAttribute('viewBox', '0 0 20 20')
+    svg.setAttribute('fill', 'none')
+    svg.setAttribute('stroke', 'currentColor')
+    svg.setAttribute('stroke-width', '1.6')
+    svg.setAttribute('stroke-linecap', 'round')
+    svg.setAttribute('stroke-linejoin', 'round')
+    svg.setAttribute('aria-hidden', 'true')
+    ACTION_ICONS[name].forEach(d => {
+      const path = document.createElementNS(SVG_NS, 'path')
+      path.setAttribute('d', d)
+      svg.appendChild(path)
+    })
+    button.appendChild(svg)
+
+    button.addEventListener('click', () => {
+      this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true }))
+    })
+    return button
   }
 
   private buildLog(): HTMLElement {
@@ -462,6 +528,9 @@ export class ToolairlockChatPanel extends HTMLElement {
     this.input.disabled = locked
     this.sendButton.disabled = locked
     this.input.placeholder = PLACEHOLDER[this.current.status]
+    // 空会话时清空是空动作；执行中清空更糟——Run 还在跑，抹掉历史会让接下来的
+    // 助手发言落在一段没有来由的对话上。关闭按钮不受此限，收起不影响 Run。
+    this.newChatButton.disabled = locked || this.current.entries.length === 0
   }
 
   private renderStatus(): void {

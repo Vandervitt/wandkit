@@ -8,7 +8,7 @@
 | 入口 | 内容 | 依赖 |
 |---|---|---|
 | `@toolairlock/chat` | `ChatSession` 与协议类型 | 无，纯逻辑零 DOM |
-| `@toolairlock/chat/ui` | `<toolairlock-chat>` 面板 | DOM |
+| `@toolairlock/chat/ui` | `<toolairlock-chat>` 面板 + `<toolairlock-dock>` 悬浮壳 | DOM |
 | `@toolairlock/chat/bridge` | 接 `AgentRuntime` | 无（鸭子类型，不 import 核心） |
 
 按需取用——只要无头核心时，面板与桥接不会被打进包里。
@@ -120,10 +120,23 @@ container.appendChild(panel)
 面板自己不持有状态：`state` 进、事件出。因此把同一个会话接到自己的 React / Vue
 组件上是一等用法，而不是变通。
 
+### 标题栏上的两个动作
+
+| 事件 | 触发 | 谁来做 |
+|---|---|---|
+| `new-chat` | 点垃圾桶 | 宿主。通常是 `session.clear()`，外加收拾会话之外的残留（遮罩、挂起的闸门 Promise） |
+| `close` | 点关闭 | 悬浮壳自动收起；不用壳的接入方自己监听 |
+
+两个都**只派发事件，不自己动手**：面板不持有状态，清空得由持有它的一方来做；收起与否更是
+壳的事，面板不该知道自己被装在什么里面。
+
+执行中与空会话时新建按钮不可点——前者会让运行中的 Run 失去落点，后者是个什么都不做的按钮。
+关闭任何时候都能点，收起不影响 Run。
+
 样式通过 `::part()` 与 CSS 变量定制：
 
 - part：`log` `entry` `bubble` `tools` `tool-chip` `cursor` `error` `confirmation`
-  `composer` `input` `send`
+  `composer` `input` `send` `action` `new-chat` `close`
 - 变量：`--tal-fg` `--tal-bg` `--tal-border` `--tal-danger` `--tal-radius` `--tal-font`
   `--tal-user-bg` `--tal-bubble-bg`
 
@@ -149,6 +162,52 @@ session.subscribe(state => {
   panel.confirmationHost.appendChild(card)
 })
 ```
+
+## 嵌进别人的应用：悬浮壳
+
+面板自己只声明 `height: 100%`，定位交给宿主——于是接入方总要手写一段固定侧栏，助手常驻
+压住右侧一整条，还没有收起。那段样板由 `<toolairlock-dock>` 接管：**收起时只是右下角一个
+图标，展开时是浮在应用之上的一块面板**，不参与宿主布局，不占据任何空间。
+
+```ts
+import { CHAT_DOCK_TAG, CHAT_PANEL_TAG } from '@toolairlock/chat/ui'
+
+const dock = document.createElement(CHAT_DOCK_TAG)
+const panel = document.createElement(CHAT_PANEL_TAG)
+dock.appendChild(panel)
+document.body.appendChild(dock)
+
+panel.addEventListener('send', event => controls.send(event.detail.text))
+panel.addEventListener('new-chat', () => session.clear())
+session.subscribe(state => {
+  panel.state = state
+  dock.state = state   // 壳只取「忙不忙」和「有没有事等人决定」
+})
+```
+
+壳与面板之间没有耦合：壳把插槽内容撑满，塞自己的 React / Vue 组件同样可用。收起由内容里
+冒泡上来的 `close` 事件触发（面板标题栏的关闭按钮就派发它），因此换掉面板只要照样派发一个
+`close`。展开后右下角图标会让位——留着只会被面板压住露出一角，看起来像点不了。
+
+- part：`frame` `launcher` `badge` `icon`
+- 变量：`--tal-dock-inset` `--tal-dock-width` `--tal-dock-height` `--tal-dock-size`
+- 事件：`dock-toggle`（`detail.open`），宿主可据此记住展开偏好
+- 属性：`open` 双向可写并反射为 `[open]`；`Esc` 收起
+
+### 待确认会强制展开
+
+收起是用户的意愿，`dock.state` 却会在出现待确认项或错误时违反它。因为待确认意味着某个真实
+写请求正挂在半空：用户看不到卡片就不会点，业务侧只表现为按钮一直转圈，**治理就此静默失效**。
+同一件事只弹一次——用户手动收起后壳不再跟他抢这个按钮，换了另一个待确认项才重新展开。
+
+### 层级高于遮罩，因此不必再撤罩
+
+壳的 `z-index` 是 `DOCK_LAYER`（2147483647），比 `@toolairlock/ui` 的 `MASK_LAYER` 高一级
+——遮罩刻意让出的正是这一档。确认卡片挂在面板里，壳在遮罩之上才点得动。
+
+于是接入方**不需要**在确认期间撤掉遮罩（`createMaskReleaser`）：遮罩的职责是挡住用户操作
+**宿主页面**，治理界面本就该始终可点。两件事分开比在时序上互相让位可靠。自己放置卡片、
+容器层级低于遮罩的接入方仍然需要它。
 
 ## 两份数据
 

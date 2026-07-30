@@ -9,12 +9,13 @@ function mount(state?: Partial<ChatState>): ToolairlockChatPanel {
   return panel
 }
 
+// 按 token 匹配：`part` 是空格分隔的列表（如 `action close`），整串相等会漏掉多 token 的节点。
 function partOf(panel: ToolairlockChatPanel, name: string): HTMLElement | null {
-  return panel.shadowRoot?.querySelector(`[part="${name}"]`) ?? null
+  return panel.shadowRoot?.querySelector(`[part~="${name}"]`) ?? null
 }
 
 function partsOf(panel: ToolairlockChatPanel, name: string): HTMLElement[] {
-  return Array.from(panel.shadowRoot?.querySelectorAll(`[part="${name}"]`) ?? [])
+  return Array.from(panel.shadowRoot?.querySelectorAll(`[part~="${name}"]`) ?? [])
 }
 
 beforeEach(() => {
@@ -373,5 +374,63 @@ describe('确认卡片挂载点', () => {
     panel.state = { entries: [{ id: '1', role: 'user', content: 'x', at: 1 }], status: 'busy' }
 
     expect(panel.shadowRoot?.getElementById('card')).not.toBeNull()
+  })
+})
+
+describe('标题栏动作', () => {
+  it('提供新建对话与关闭两个动作，新建在左、关闭在右', () => {
+    const panel = mount()
+
+    const labels = partsOf(panel, 'action').map(node => node.getAttribute('aria-label'))
+    expect(labels).toEqual(['新建对话', '关闭助手'])
+  })
+
+  it('点关闭派发 close，宿主或悬浮壳据此收起', () => {
+    const panel = mount()
+    const listener = vi.fn()
+    panel.addEventListener('close', listener)
+
+    partOf(panel, 'close')?.click()
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('点新建派发 new-chat，由宿主决定怎么清——面板自己不持有状态', () => {
+    const panel = mount({ entries: [{ id: '1', role: 'user', content: 'x', at: 1 }] })
+    const listener = vi.fn()
+    panel.addEventListener('new-chat', listener)
+
+    partOf(panel, 'new-chat')?.click()
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    // 面板不自作主张清空：状态没回来之前，界面上还是原来那一条
+    expect(partsOf(panel, 'entry')).toHaveLength(1)
+  })
+
+  it('事件冒泡且穿透 Shadow DOM，宿主在容器上监听即可', () => {
+    // 要有内容，否则新建按钮是禁用的，点了本就不该有事件
+    const panel = mount({ entries: [{ id: '1', role: 'user', content: 'x', at: 1 }] })
+    const seen: string[] = []
+    document.body.addEventListener('close', () => seen.push('close'))
+    document.body.addEventListener('new-chat', () => seen.push('new-chat'))
+
+    partOf(panel, 'new-chat')?.click()
+    partOf(panel, 'close')?.click()
+
+    expect(seen).toEqual(['new-chat', 'close'])
+  })
+
+  it('执行中不许新建——上一轮还没了结，清空会让运行中的 Run 失去落点', () => {
+    const panel = mount({ status: 'busy' })
+
+    expect((partOf(panel, 'new-chat') as HTMLButtonElement).disabled).toBe(true)
+    // 关闭任何时候都能点：收起不影响 Run，用户随时可以让它让位
+    expect((partOf(panel, 'close') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('空会话时新建也不可点，避免一个什么都不做的按钮', () => {
+    const panel = mount()
+
+    expect((partOf(panel, 'new-chat') as HTMLButtonElement).disabled).toBe(true)
   })
 })

@@ -6,7 +6,7 @@
  * | 入口 | 内容 | 依赖 |
  * |---|---|---|
  * | `@toolairlock/chat` | {@link ChatSession} 与协议类型 | 无，纯逻辑零 DOM |
- * | `@toolairlock/chat/ui` | `<toolairlock-chat>` 面板 | DOM |
+ * | `@toolairlock/chat/ui` | `<toolairlock-chat>` 面板 + `<toolairlock-dock>` 悬浮壳 | DOM |
  * | `@toolairlock/chat/bridge` | 接 `AgentRuntime` | 无（鸭子类型，不 import 核心） |
  *
  * **可以单独使用。** 会话只认 OpenAI chat-completions 形态的消息与流式增量，因此
