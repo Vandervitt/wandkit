@@ -94,15 +94,6 @@ const STYLE = `
 
 [part="entry"] { display: flex; flex-direction: column; gap: 4px; max-width: 88%; }
 [part="entry"][data-role="user"] { align-self: flex-end; align-items: flex-end; }
-[part="entry"][data-role="tool"] {
-  max-width: 100%; flex-direction: row; align-items: center; gap: 9px;
-  padding: 8px 12px; border-radius: 12px;
-  background: rgba(255, 255, 255, .62);
-  -webkit-backdrop-filter: blur(16px);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, .9);
-  box-shadow: 0 6px 16px -12px rgba(15, 23, 41, .32);
-}
 [part="bubble"] {
   padding: 10px 15px; border-radius: 20px 20px 20px 6px; line-height: 1.66;
   white-space: pre-wrap; word-break: break-word;
@@ -117,39 +108,27 @@ const STYLE = `
   background: linear-gradient(#3d9bff, #0a7ff0);
   box-shadow: 0 10px 22px -12px rgba(10, 132, 255, .8), inset 0 1px 0 rgba(255, 255, 255, .35);
 }
-[data-role="tool"] [part="bubble"] {
-  padding: 0; border: 0; border-radius: 0; background: none; box-shadow: none;
-  -webkit-backdrop-filter: none; backdrop-filter: none;
-  font-size: 12.5px; color: var(--_dim); flex: 1 1 auto;
-}
-[part="tool-icon"] {
-  flex: 0 0 auto; font-size: 11px; font-weight: 700; color: var(--_success);
-}
-[data-ok="false"] [part="tool-icon"], [data-ok="false"] [part="bubble"] { color: #d92b21; }
-[part="entry"][data-role="tool"][data-ok="false"] {
-  background: rgba(255, 59, 48, .09); border-color: rgba(255, 59, 48, .22);
-}
 
-[part="tools"] { display: flex; flex-wrap: wrap; gap: 6px; }
-[part="tool-call"] {
-  border-radius: 10px; background: rgba(255, 255, 255, .6);
-  border: 1px solid rgba(255, 255, 255, .9); overflow: hidden;
+/* 进度行：一句话说明正在做什么。刻意做得比气泡轻——它是过渡态，不是对话内容。 */
+[part="step"] {
+  display: flex; align-items: center; gap: 8px; align-self: flex-start;
+  padding: 7px 13px; border-radius: 999px; max-width: 88%;
+  background: rgba(255, 255, 255, .55);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, .85);
+  color: var(--_dim); font-size: 12.5px;
 }
-[part="tool-chip"] {
-  display: inline-block; padding: 3px 9px; border-radius: 999px;
-  background: rgba(255, 255, 255, .6); border: 1px solid rgba(255, 255, 255, .9);
-  color: #475569; font-size: 12px;
-  font-family: var(--tal-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+[part="step-spinner"] {
+  flex: 0 0 auto; width: 11px; height: 11px; border-radius: 50%;
+  border: 1.5px solid rgba(10, 132, 255, .25); border-top-color: #0a7ff0;
+  animation: tal-step-spin .7s linear infinite;
 }
-[part="tool-call"] > [part="tool-chip"] {
-  border: 0; background: none; cursor: pointer; user-select: none; list-style: none;
-}
-[part="tool-call"] > [part="tool-chip"]::-webkit-details-marker { display: none; }
-[part="tool-args"] {
-  margin: 0; padding: 8px 10px; overflow-x: auto;
-  background: rgba(15, 23, 41, .05); color: #3c4a60;
-  font-family: var(--tal-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 11px; line-height: 1.55; white-space: pre-wrap; word-break: break-all;
+[part="step-label"] { white-space: pre-wrap; word-break: break-word; }
+@keyframes tal-step-spin { to { transform: rotate(360deg); } }
+/* 用户把动效关掉时，转圈就该停——但指示本身必须留着，否则忙碌态没有任何提示。 */
+@media (prefers-reduced-motion: reduce) {
+  [part="step-spinner"] { animation: none; }
 }
 
 [part="time"] {
@@ -215,8 +194,8 @@ const STYLE = `
 }
 `
 
-/** 工具结果的成败符号。用符号而不是文字，避免与助手发言混淆。 */
-const TOOL_ICON = { true: '✓', false: '✕' }
+/** 还没有任何步骤完成时的进度文案。见 {@link ChatState.progress}。 */
+const PROGRESS_FALLBACK = '正在处理…'
 
 /** 状态在界面上的说法。回答的是「我现在能不能说话」。 */
 const STATUS_LABEL: Record<ChatStatus, string> = {
@@ -255,22 +234,6 @@ const BOTTOM_SLACK = 40
 
 /** 输入框自增高的上限，约 5 行。 */
 const INPUT_MAX_HEIGHT = 132
-
-/**
- * 格式化工具调用参数供展开查看。
- *
- * 解析失败就原样展示：`arguments` 是模型吐出的字符串，流式中途或模型出错时本就可能不是
- * 合法 JSON，那种时候原文比一句「解析失败」有用。
- */
-function formatArguments(raw: string): string {
-  const text = raw.trim()
-  if (text === '' || text === '{}') return ''
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch (_error) {
-    return text
-  }
-}
 
 /** 只显示时分：面板里的相对时序才是有用的信息，日期由业务侧的会话列表负责。 */
 function formatTime(at: number): string {
@@ -547,7 +510,7 @@ export class ToolairlockChatPanel extends HTMLElement {
     const wasAtBottom = this.isAtBottom()
     this.log.replaceChildren()
 
-    if (this.current.entries.length === 0) {
+    if (this.current.entries.length === 0 && this.current.status !== 'busy') {
       const empty = document.createElement('div')
       empty.setAttribute('part', 'empty')
       empty.textContent = '还没有对话'
@@ -559,6 +522,11 @@ export class ToolairlockChatPanel extends HTMLElement {
     this.current.entries.forEach(entry => {
       this.log.appendChild(this.renderEntry(entry))
     })
+    // 忙碌期间末尾挂一行进度。第一个工具跑完之前 progress 还是空的，用泛化文案兜住——
+    // 那段时间恰恰是用户最容易以为「它没反应」的时候。
+    if (this.current.status === 'busy') {
+      this.log.appendChild(this.renderStep(this.current.progress || PROGRESS_FALLBACK))
+    }
     if (wasAtBottom) this.scrollToBottom()
     else this.syncJumpButton()
   }
@@ -586,16 +554,6 @@ export class ToolairlockChatPanel extends HTMLElement {
     const wrapper = document.createElement('div')
     wrapper.setAttribute('part', 'entry')
     wrapper.setAttribute('data-role', entry.role)
-    if (entry.ok !== undefined) wrapper.setAttribute('data-ok', String(entry.ok))
-
-    // 成败符号独立成节点，而不是拼进正文：拼进去就没法只给符号上色，
-    // 而「这一步成了没有」应当比文案本身更快被看到。
-    if (entry.role === 'tool' && entry.ok !== undefined) {
-      const icon = document.createElement('span')
-      icon.setAttribute('part', 'tool-icon')
-      icon.textContent = TOOL_ICON[String(entry.ok) as 'true' | 'false']
-      wrapper.appendChild(icon)
-    }
 
     if (entry.content || entry.streaming) {
       const bubble = document.createElement('div')
@@ -609,58 +567,39 @@ export class ToolairlockChatPanel extends HTMLElement {
       wrapper.appendChild(bubble)
     }
 
-    if (entry.toolCalls?.length) wrapper.appendChild(this.renderToolCalls(entry.toolCalls))
-
-    // 工具结果行是单行布局，塞时间会挤掉正文；它的时序由上下两条消息交代得清楚。
-    if (entry.role !== 'tool') {
-      const time = formatTime(entry.at)
-      if (time) {
-        const stamp = document.createElement('span')
-        stamp.setAttribute('part', 'time')
-        stamp.textContent = time
-        wrapper.appendChild(stamp)
-      }
+    const time = formatTime(entry.at)
+    if (time) {
+      const stamp = document.createElement('span')
+      stamp.setAttribute('part', 'time')
+      stamp.textContent = time
+      wrapper.appendChild(stamp)
     }
 
     return wrapper
   }
 
   /**
-   * 渲染本轮发起的工具调用。
+   * 渲染进度行：一句业务语言，说明现在正在做什么。
    *
-   * 有参数的做成可展开——名字回答「在做什么」，参数回答「对谁做」，而后者往往才是用户
-   * 真正需要核对的东西（删的是哪个客户）。默认折叠，日常不被 JSON 噪声淹没。
+   * 它取代了逐条渲染工具调用。用户需要知道的是「还在动、动到哪儿了」，不是
+   * `page_click_v1` 与元素下标——那些是执行细节，去 trace 里查。Run 一结束这一行
+   * 就消失，只留下最终回答。
    */
-  private renderToolCalls(calls: NonNullable<ChatEntry['toolCalls']>): HTMLElement {
-    const tools = document.createElement('div')
-    tools.setAttribute('part', 'tools')
+  private renderStep(text: string): HTMLElement {
+    const row = document.createElement('div')
+    row.setAttribute('part', 'step')
 
-    calls.forEach(call => {
-      const args = formatArguments(call.function.arguments ?? '')
-      if (args === '') {
-        const chip = document.createElement('span')
-        chip.setAttribute('part', 'tool-chip')
-        chip.textContent = call.function.name
-        tools.appendChild(chip)
-        return
-      }
+    const spinner = document.createElement('span')
+    spinner.setAttribute('part', 'step-spinner')
+    // 纯装饰。读屏软件念一个转圈符号只会干扰，真正该被念出来的是后面那句话。
+    spinner.setAttribute('aria-hidden', 'true')
 
-      const details = document.createElement('details')
-      details.setAttribute('part', 'tool-call')
+    const label = document.createElement('span')
+    label.setAttribute('part', 'step-label')
+    label.textContent = text
 
-      const summary = document.createElement('summary')
-      summary.setAttribute('part', 'tool-chip')
-      summary.textContent = call.function.name
-
-      const pre = document.createElement('pre')
-      pre.setAttribute('part', 'tool-args')
-      pre.textContent = args
-
-      details.append(summary, pre)
-      tools.appendChild(details)
-    })
-
-    return tools
+    row.append(spinner, label)
+    return row
   }
 }
 

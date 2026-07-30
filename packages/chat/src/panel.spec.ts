@@ -43,28 +43,10 @@ describe('渲染', () => {
       .toEqual(['删除张三', '已删除'])
   })
 
-  it('工具结果按成败加符号并标记 data-ok', () => {
+  it('消息带时分时间戳', () => {
     const panel = mount({
       entries: [
-        { id: '1', role: 'tool', content: '已删除', ok: true, toolCallId: 'c1', at: 1 },
-        { id: '2', role: 'tool', content: '目标不存在', ok: false, toolCallId: 'c2', at: 2 }
-      ]
-    })
-
-    // 符号独立成节点：拼进正文就没法只给符号上色，而「这一步成了没有」
-    // 应当比文案本身更快被看到。
-    expect(partsOf(panel, 'tool-icon').map(e => e.textContent)).toEqual(['✓', '✕'])
-    expect(partsOf(panel, 'bubble').map(e => e.textContent))
-      .toEqual(['已删除', '目标不存在'])
-    expect(partsOf(panel, 'entry').map(e => e.getAttribute('data-ok')))
-      .toEqual(['true', 'false'])
-  })
-
-  it('消息带时分时间戳，工具结果行不带', () => {
-    const panel = mount({
-      entries: [
-        { id: '1', role: 'user', content: '删除张三', at: Date.parse('2026-07-30T09:05:00') },
-        { id: '2', role: 'tool', content: '已删除', ok: true, toolCallId: 'c1', at: 2 }
+        { id: '1', role: 'user', content: '删除张三', at: Date.parse('2026-07-30T09:05:00') }
       ]
     })
 
@@ -73,69 +55,55 @@ describe('渲染', () => {
     expect(stamps[0].textContent).toBe('09:05')
   })
 
-  it('工具调用渲染成标签，让人看清 Agent 在做什么', () => {
-    const panel = mount({
-      entries: [{
-        id: '1', role: 'assistant', content: '', at: 1,
-        toolCalls: [
-          { id: 'c1', type: 'function', function: { name: 'user_query_v1', arguments: '{}' } },
-          { id: 'c2', type: 'function', function: { name: 'user_delete_v1', arguments: '{}' } }
-        ]
-      }]
+  /**
+   * 执行过程不进聊天。
+   *
+   * 曾经把每一次工具调用与工具结果都渲染出来，用户看到的是 `page_click_v1`、
+   * `✓ 已点击 [0]` 这类东西——内部函数名加元素下标，还把唯一一句真正的回答淹没在
+   * 十几条噪声里。现在只留一行业务语言的进度，Run 一结束就消失。
+   */
+  describe('执行进度', () => {
+    it('忙碌时在末尾渲染一行进度，用业务语言而非函数名', () => {
+      const panel = mount({
+        entries: [{ id: '1', role: 'user', content: '新建员工', at: 1 }],
+        status: 'busy',
+        progress: '已打开「员工管理」'
+      })
+
+      expect(partOf(panel, 'step-label')?.textContent).toBe('已打开「员工管理」')
+      expect(panel.shadowRoot?.textContent).not.toContain('page_click_v1')
     })
 
-    expect(partsOf(panel, 'tool-chip').map(e => e.textContent))
-      .toEqual(['user_query_v1', 'user_delete_v1'])
-    // 无参数的调用没有可展开的内容，不该做成一个点开是空的折叠块。
-    expect(partsOf(panel, 'tool-call')).toHaveLength(0)
-  })
+    it('还没有任何步骤完成时给一句泛化文案', () => {
+      // 这段时间恰恰是用户最容易以为「它没反应」的时候，不能一片空白。
+      const panel = mount({
+        entries: [{ id: '1', role: 'user', content: '新建员工', at: 1 }],
+        status: 'busy'
+      })
 
-  it('带参数的工具调用可展开，默认折叠', () => {
-    // 名字回答「在做什么」，参数回答「对谁做」，后者才是用户真正需要核对的。
-    const panel = mount({
-      entries: [{
-        id: '1', role: 'assistant', content: '', at: 1,
-        toolCalls: [{
-          id: 'c1', type: 'function',
-          function: { name: 'user_delete_v1', arguments: '{"id":"u_1"}' }
-        }]
-      }]
+      expect(partOf(panel, 'step-label')?.textContent).toBe('正在处理…')
     })
 
-    const details = partOf(panel, 'tool-call') as HTMLDetailsElement
-    expect(details).not.toBeNull()
-    expect(details.open).toBe(false)
-    expect(partOf(panel, 'tool-chip')?.textContent).toBe('user_delete_v1')
-    expect(partOf(panel, 'tool-args')?.textContent).toBe('{\n  "id": "u_1"\n}')
-  })
+    it('Run 结束后进度行消失，只留最终回答', () => {
+      const panel = mount({
+        entries: [
+          { id: '1', role: 'user', content: '新建员工', at: 1 },
+          { id: '2', role: 'assistant', content: '已创建员工「新员工」。', at: 2 }
+        ],
+        status: 'idle'
+      })
 
-  it('参数不是合法 JSON 时原样展示', () => {
-    // 流式中途或模型出错时 arguments 本就可能不完整，原文比一句「解析失败」有用。
-    const panel = mount({
-      entries: [{
-        id: '1', role: 'assistant', content: '', at: 1,
-        toolCalls: [{
-          id: 'c1', type: 'function', function: { name: 'f', arguments: '{"id":"u_' }
-        }]
-      }]
+      expect(partOf(panel, 'step')).toBeNull()
+      expect(partsOf(panel, 'bubble').map(e => e.textContent))
+        .toEqual(['新建员工', '已创建员工「新员工」。'])
     })
 
-    expect(partOf(panel, 'tool-args')?.textContent).toBe('{"id":"u_')
-  })
+    it('刚发出第一句、还没有任何条目时也显示进度而不是空态', () => {
+      const panel = mount({ entries: [], status: 'busy' })
 
-  it('工具调用参数按纯文本渲染', () => {
-    const panel = mount({
-      entries: [{
-        id: '1', role: 'assistant', content: '', at: 1,
-        toolCalls: [{
-          id: 'c1', type: 'function',
-          function: { name: 'f', arguments: '{"name":"<img src=x onerror=alert(1)>"}' }
-        }]
-      }]
+      expect(partOf(panel, 'step')).not.toBeNull()
+      expect(partOf(panel, 'empty')).toBeNull()
     })
-
-    expect(partOf(panel, 'tool-args')?.querySelector('img')).toBeNull()
-    expect(partOf(panel, 'tool-args')?.textContent).toContain('<img src=x onerror=alert(1)>')
   })
 
   it('流式中显示光标', () => {

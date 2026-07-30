@@ -40,9 +40,18 @@ export class ChatSession {
   private status: ChatState['status'] = 'idle'
   private confirmation?: ChatConfirmation
   private error?: string
+  /** 当前步骤的业务语言描述。见 {@link ChatState.progress}。 */
+  private progress?: string
   private sequence = 0
   /** 正在流式接收的那条 assistant 条目在 `entries` 中的下标。 */
   private streamingIndex: number | null = null
+  /**
+   * 流式中累积的工具调用。
+   *
+   * 放在会话上而不是展示条目上：工具调用不进入展示（见 {@link toEntry}），挂在条目
+   * 里会让渲染层重新有机会把它画出来，而那正是要消除的东西。
+   */
+  private streamingToolCalls: ChatToolCall[] = []
 
   constructor(options: ChatSessionOptions = {}) {
     this.now = options.now ?? Date.now
@@ -55,6 +64,8 @@ export class ChatSession {
       entries: this.entries.map(entry => ({ ...entry })),
       status: this.status,
       ...(this.confirmation ? { confirmation: { ...this.confirmation } } : {}),
+      // 进度只在忙碌期间有意义。Run 结束还挂着「正在打开员工管理」，用户会以为它卡住了。
+      ...(this.status === 'busy' && this.progress ? { progress: this.progress } : {}),
       ...(this.error ? { error: this.error } : {})
     }
   }
@@ -74,6 +85,8 @@ export class ChatSession {
   /** 用户发话。会清掉上一轮的错误，并把状态切到 `busy`。 */
   appendUser(content: string): void {
     this.error = undefined
+    // 新的一轮从零开始：留着上一轮的末步描述，会在本轮第一个工具跑完前一直显示错的东西。
+    this.progress = undefined
     this.append({ role: 'user', content })
   }
 
@@ -108,7 +121,7 @@ export class ChatSession {
       const entry = this.entries[index]
       if (typeof delta.content === 'string') entry.content += delta.content
       if (delta.tool_calls) {
-        entry.toolCalls = mergeToolCallDeltas(entry.toolCalls ?? [], delta.tool_calls)
+        this.streamingToolCalls = mergeToolCallDeltas(this.streamingToolCalls, delta.tool_calls)
       }
       this.status = 'busy'
     }
@@ -148,6 +161,7 @@ export class ChatSession {
   fail(message: string): void {
     this.endStreaming()
     this.error = message
+    this.progress = undefined
     this.status = 'idle'
     this.emit()
   }
@@ -165,7 +179,9 @@ export class ChatSession {
     this.status = 'idle'
     this.confirmation = undefined
     this.error = undefined
+    this.progress = undefined
     this.streamingIndex = null
+    this.streamingToolCalls = []
     this.emit()
   }
 
@@ -201,18 +217,28 @@ export class ChatSession {
     if (this.streamingIndex === null) return
     const entry = this.entries[this.streamingIndex]
     delete entry.streaming
+    const toolCalls = this.streamingToolCalls
     const message: ChatAssistantMessage = {
       role: 'assistant',
       content: entry.content || null
     }
-    if (entry.toolCalls?.length) message.tool_calls = entry.toolCalls
+    if (toolCalls.length) message.tool_calls = toolCalls
     this.messages.push(cloneMessage(message))
+    // 只发了工具调用、一个字都没说的那一轮，条目会是个空气泡。留着它，一次多步任务
+    // 就会在界面上排出十几个空白框。
+    if (!entry.content) this.entries.splice(this.streamingIndex, 1)
     this.streamingIndex = null
+    this.streamingToolCalls = []
     this.status = message.tool_calls ? 'busy' : 'idle'
   }
 
   /**
    * 把线协议消息投影成可渲染条目。
+   *
+   * **只有人看得懂的对话会投影出来。** 工具调用与工具结果留在 `messages` 里供下一轮
+   * 请求使用，但不进入 `entries`——它们是执行细节，展示出来就是
+   * `page_click_v1`、`✓ 已点击 [0]` 这种东西：内部函数名加元素下标，还会把唯一一句
+   * 真正的回答淹没在十几条噪声中。执行进度改走 {@link progress}。
    *
    * @returns `undefined` 表示该消息不进入展示。
    */
@@ -223,23 +249,14 @@ export class ChatSession {
       return { ...base, role: 'user', content: message.content }
     }
     if (message.role === 'assistant') {
-      const entry: ChatEntry = {
-        ...base,
-        role: 'assistant',
-        content: message.content ?? ''
-      }
-      if (message.tool_calls?.length) entry.toolCalls = message.tool_calls.map(cloneToolCall)
-      return entry
+      // 只发工具调用、没有话说的轮次不产生条目：那一轮对用户而言什么都没发生。
+      if (!message.content) return undefined
+      return { ...base, role: 'assistant', content: message.content }
     }
-    // tool：内容通常是序列化的 ToolResult，取其 message 展示、ok 标记成败。
+    // tool：不展示，但推进进度指示，让用户知道还在动、动到哪儿了。
     const parsed = parseToolContent(message.content)
-    return {
-      ...base,
-      role: 'tool',
-      content: parsed.message,
-      toolCallId: message.tool_call_id,
-      ...(parsed.ok === undefined ? {} : { ok: parsed.ok })
-    }
+    if (parsed.ok !== false) this.progress = parsed.message
+    return undefined
   }
 
   /** 一条消息落地后，会话应处于什么状态。 */

@@ -82,7 +82,7 @@ describe('运行时事件 → 会话状态', () => {
     expect(messages[1]).toMatchObject({ role: 'tool', tool_call_id: 'c1' })
   })
 
-  it('带工具调用的轮次不产生空气泡，但工具名可见', () => {
+  it('带工具调用的轮次不产生条目，工具名不出现在界面上', () => {
     const { runtime, onEvent } = createRuntime()
     connectRuntime(session, runtime, { onEvent })
 
@@ -94,24 +94,26 @@ describe('运行时事件 → 会话状态', () => {
       }]
     })
 
-    const entry = session.state.entries[0]
-    expect(entry.content).toBe('')
-    expect(entry.toolCalls?.[0].function.name).toBe('page_read_v1')
+    expect(session.state.entries).toHaveLength(0)
+    // 但必须留在线协议里，否则随后的 tool 消息成了没有发起者的孤儿。
+    expect(session.toMessages()[0]).toMatchObject({
+      tool_calls: [{ id: 'c1' }]
+    })
   })
 
-  it('tool_result 事件带上成败标记', () => {
+  it('tool_result 事件推进进度，而不是渲染成一条消息', () => {
     const { runtime, onEvent } = createRuntime()
     connectRuntime(session, runtime, { onEvent })
+    session.appendUser('新建员工')
 
     runtime.emit({
       type: 'tool_result',
       toolCallId: 'c1',
-      result: { ok: false, message: '目标不存在' }
+      result: { ok: true, message: '已打开「员工管理」' }
     })
 
-    expect(session.state.entries[0]).toMatchObject({
-      role: 'tool', toolCallId: 'c1', ok: false, content: '目标不存在'
-    })
+    expect(session.state.entries.map(entry => entry.role)).toEqual(['user'])
+    expect(session.state.progress).toBe('已打开「员工管理」')
   })
 
   it('confirmation 事件挂起会话', () => {

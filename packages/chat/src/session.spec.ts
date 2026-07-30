@@ -40,7 +40,13 @@ describe('完整消息', () => {
     expect(session.state.entries).toHaveLength(0)
   })
 
-  it('assistant 的工具调用被保留，供界面显示「正在做什么」', () => {
+  /**
+   * 执行细节留在线协议里，不进展示。
+   *
+   * 曾经每一次工具调用与工具结果都投影成条目，用户看到的是 `page_click_v1`、
+   * `✓ 已点击 [0]`——内部函数名加元素下标，还把唯一一句真正的回答淹没在十几条噪声里。
+   */
+  it('只发工具调用的 assistant 轮次不产生条目，但保留在消息里', () => {
     session.append({
       role: 'assistant',
       content: null,
@@ -50,26 +56,68 @@ describe('完整消息', () => {
       }]
     })
 
-    expect(session.state.entries[0].toolCalls?.[0].function.name).toBe('user_delete_v1')
+    expect(session.state.entries).toHaveLength(0)
+    // 留在线协议里是硬要求：删掉它，随后的 tool 消息就成了没有发起者的孤儿，
+    // 导出的历史在 OpenAI 协议下非法。
+    expect(session.toMessages()[0]).toMatchObject({ role: 'assistant' })
     expect(session.state.status).toBe('busy')
   })
 
-  it('tool 结果按 ok 标记成败', () => {
+  it('tool 结果不产生条目，而是推进进度指示', () => {
+    session.appendUser('新建员工')
     session.append({
       role: 'tool', tool_call_id: 'c1',
-      content: JSON.stringify({ ok: false, message: '目标不存在' })
+      content: JSON.stringify({ ok: true, message: '已打开「员工管理」' })
     })
 
-    expect(session.state.entries[0]).toMatchObject({
-      role: 'tool', toolCallId: 'c1', ok: false, content: '目标不存在'
-    })
+    expect(session.state.entries.map(e => e.role)).toEqual(['user'])
+    expect(session.state.progress).toBe('已打开「员工管理」')
   })
 
-  it('非 JSON 的 tool 内容原样展示，不崩', () => {
+  it('失败的 tool 结果不推进进度——那不是「做到了这一步」', () => {
+    session.appendUser('新建员工')
+    session.append({
+      role: 'tool', tool_call_id: 'c1',
+      content: JSON.stringify({ ok: true, message: '已打开「员工管理」' })
+    })
+    session.append({
+      role: 'tool', tool_call_id: 'c2',
+      content: JSON.stringify({ ok: false, message: '索引 9 越界' })
+    })
+
+    expect(session.state.progress).toBe('已打开「员工管理」')
+  })
+
+  it('非 JSON 的 tool 内容原样用作进度，不崩', () => {
+    session.appendUser('查一下')
     session.append({ role: 'tool', tool_call_id: 'c1', content: '纯文本结果' })
 
-    expect(session.state.entries[0].content).toBe('纯文本结果')
-    expect(session.state.entries[0].ok).toBeUndefined()
+    expect(session.state.progress).toBe('纯文本结果')
+  })
+
+  it('Run 结束后不再暴露进度', () => {
+    session.appendUser('新建员工')
+    session.append({
+      role: 'tool', tool_call_id: 'c1',
+      content: JSON.stringify({ ok: true, message: '已打开「员工管理」' })
+    })
+    session.append({ role: 'assistant', content: '已创建员工「新员工」。' })
+
+    expect(session.state.status).toBe('idle')
+    // 挂着「已打开员工管理」不放，用户会以为它卡在那儿了。
+    expect(session.state.progress).toBeUndefined()
+  })
+
+  it('新的一轮不沿用上一轮的进度', () => {
+    session.appendUser('新建员工')
+    session.append({
+      role: 'tool', tool_call_id: 'c1',
+      content: JSON.stringify({ ok: true, message: '已打开「员工管理」' })
+    })
+    session.append({ role: 'assistant', content: '好了' })
+    session.appendUser('再来一个')
+
+    expect(session.state.progress).toBeUndefined()
   })
 })
 
@@ -115,10 +163,15 @@ describe('流式增量', () => {
       ]
     }))
 
-    expect(session.state.entries[0].toolCalls).toEqual([
-      { id: 'c1', type: 'function', function: { name: 'query', arguments: '{"a":1}' } },
-      { id: 'c2', type: 'function', function: { name: 'del', arguments: '{"b":2}' } }
-    ])
+    session.applyChunk(chunk({}, 'tool_calls'))
+
+    // 归位结果看导出的消息，而不是展示条目——工具调用不进展示。
+    expect(session.toMessages()[0]).toMatchObject({
+      tool_calls: [
+        { id: 'c1', type: 'function', function: { name: 'query', arguments: '{"a":1}' } },
+        { id: 'c2', type: 'function', function: { name: 'del', arguments: '{"b":2}' } }
+      ]
+    })
   })
 
   it('乱序到达的 index 也能正确归位', () => {
@@ -126,8 +179,11 @@ describe('流式增量', () => {
       tool_calls: [{ index: 2, id: 'c3', type: 'function', function: { name: 'z', arguments: '{}' } }]
     }))
 
-    expect(session.state.entries[0].toolCalls).toHaveLength(1)
-    expect(session.state.entries[0].toolCalls?.[0].id).toBe('c3')
+    session.applyChunk(chunk({}, 'tool_calls'))
+
+    const message = session.toMessages()[0] as { tool_calls?: Array<{ id: string }> }
+    expect(message.tool_calls).toHaveLength(1)
+    expect(message.tool_calls?.[0].id).toBe('c3')
   })
 
   it('流式结束后再来新消息会另起一条', () => {

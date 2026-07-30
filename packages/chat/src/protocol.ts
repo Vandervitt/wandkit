@@ -104,21 +104,20 @@ export interface ChatCompletionChunk {
  * 它是 {@link ChatMessage} 的**投影**而非替代：协议关心「传什么」，这里关心
  * 「怎么显示」。两者分开，是为了让渲染层的需要（流式中、待确认、失败）不必污染
  * 线协议——那会让本包吐出的消息不再是标准 OpenAI 形状。
+ *
+ * **只有人看得懂的对话进入这里。** 工具调用与工具结果留在线协议里，不投影成条目——
+ * 它们是执行细节。曾经逐条渲染过，用户看到的是 `page_click_v1`、`✓ 已点击 [0]`
+ * 这类东西：既是内部函数名与元素下标，也把一句回答淹没在十几条噪声里。执行进度改由
+ * {@link ChatState.progress} 承载，明细去 trace 里查。
  */
 export interface ChatEntry {
   /** 稳定标识，供渲染层做列表 diff。 */
   id: string
-  role: ChatMessage['role']
-  /** 展示文本。工具调用轮次为空串。 */
+  role: 'user' | 'assistant'
+  /** 展示文本。 */
   content: string
   /** 本条正在流式接收中。渲染层据此显示光标或加载态。 */
   streaming?: boolean
-  /** assistant 发起的工具调用，已按 `index` 归位。 */
-  toolCalls?: ChatToolCall[]
-  /** tool 消息对应的调用 ID。 */
-  toolCallId?: string
-  /** 工具是否执行成功。仅 tool 角色有值。 */
-  ok?: boolean
   /** 该条目产生的时间，由会话注入的时钟给出。 */
   at: number
 }
@@ -152,6 +151,14 @@ export interface ChatState {
   entries: ChatEntry[]
   status: ChatStatus
   confirmation?: ChatConfirmation
+  /**
+   * 当前正在做什么，一句业务语言。仅 `busy` 期间有值，Run 结束即清空。
+   *
+   * 它替代了逐条渲染工具调用：用户需要知道「还在动，动到哪儿了」，但不需要看见
+   * 函数名和元素下标。取自最近一次成功的工具结果，因此长任务里它会随步骤推进；
+   * 一步都还没跑完时为空，由渲染层给一句泛化的等待文案。
+   */
+  progress?: string
   /** 最近一次错误的展示文案。 */
   error?: string
 }

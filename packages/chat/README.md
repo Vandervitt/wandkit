@@ -135,8 +135,8 @@ container.appendChild(panel)
 
 样式通过 `::part()` 与 CSS 变量定制：
 
-- part：`log` `entry` `bubble` `tools` `tool-chip` `cursor` `error` `confirmation`
-  `composer` `input` `send` `action` `new-chat` `close`
+- part：`log` `entry` `bubble` `cursor` `step` `step-spinner` `step-label` `error`
+  `confirmation` `composer` `input` `send` `action` `new-chat` `close`
 - 变量：`--tal-fg` `--tal-bg` `--tal-border` `--tal-danger` `--tal-radius` `--tal-font`
   `--tal-user-bg` `--tal-bubble-bg`
 
@@ -214,9 +214,17 @@ session.subscribe(state => {
 会话内部同时维护线协议原文与展示投影：
 
 - `toMessages()` —— **标准 OpenAI 消息**，导出给下一轮请求
-- `state.entries` —— 展示投影，带 `streaming` / `ok` 这类渲染才需要的标记
+- `state.entries` —— 展示投影，只含 user / assistant 的**对话内容**
 
 不合并成一份，是因为渲染需要的东西一旦塞进消息，吐出去的就不再是标准形状了。
+
+**工具调用与工具结果不进 `entries`。** 它们留在 `toMessages()` 里（协议要求每条
+tool 消息都有发起者，删掉就非法），但不投影成条目——展示出来就是 `page_click_v1`、
+`✓ 已点击 [0]` 这类内部函数名与元素下标，还会把唯一一句真正的回答淹没在十几条噪声里。
+
+执行过程改由 `state.progress` 承载：一句业务语言（「已打开「员工管理」」），取自最近
+一次成功的工具结果，仅 `busy` 期间有值，Run 一结束即清空。自带面板把它渲染成末尾一行
+`part="step"`，明细去 `runtime.traces` 里查。
 
 ## 状态
 
