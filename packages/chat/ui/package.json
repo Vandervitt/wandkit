@@ -1,0 +1,6 @@
+{
+  "main": "../dist/ui.cjs",
+  "module": "../dist/ui.js",
+  "types": "../dist/ui.d.ts",
+  "sideEffects": true
+}

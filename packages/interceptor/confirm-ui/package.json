@@ -1,0 +1,6 @@
+{
+  "main": "../dist/confirm-ui.cjs",
+  "module": "../dist/confirm-ui.js",
+  "types": "../dist/confirm-ui.d.ts",
+  "sideEffects": false
+}

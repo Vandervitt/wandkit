@@ -30,7 +30,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "confirm-ui"
   ],
   "scripts": {
     "build": "tsup",

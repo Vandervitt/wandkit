@@ -29,7 +29,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "testing"
   ],
   "scripts": {
     "build": "tsup",

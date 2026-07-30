@@ -46,7 +46,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "ui",
+    "bridge"
   ],
   "scripts": {
     "build": "tsup",
