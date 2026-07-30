@@ -77,6 +77,26 @@ export interface ToolResult<T = unknown> {
    */
   needsUserInput?: true
   /**
+   * 这次没做成，但**模型自己就能纠正**，不需要问用户。
+   *
+   * 打上它，Runtime 会把 {@link message} 连同失败一起回喂给模型，让它下一轮改正，
+   * 而不是终结整个 Run。
+   *
+   * 与 {@link needsUserInput} 的区别在于「谁能修」：缺的是用户脑子里的信息（该给哪个
+   * 客户开户？）就用 `needsUserInput`；缺的是模型自己下一步就能补上的东西（索引失效了，
+   * 重新读一次页面即可）就用这个。
+   *
+   * **没有这个标记时，所有 `ok: false` 都会终结 Run。** 对页面原语这类需要试探的工具
+   * 是致命的：模型第一步没读页面就点击，拿到的是一句「工具运行失败，请稍后重试」，
+   * 然后 Run 就结束了——它既看不到该怎么改，也没有下一轮可以改。实测到过。
+   *
+   * 循环风险由 `maxRounds` / `maxToolCalls` 兜底，与模型反复调错工具是同一道防线。
+   *
+   * @example
+   * return { ok: false, message: '索引 3 已失效，请重新读取页面', retryable: true }
+   */
+  retryable?: true
+  /**
    * 该结果由用户取消或停止产生。
    *
    * 必须用这个标记判定取消，绝不要比对 {@link message}。message 是可本地化、可被

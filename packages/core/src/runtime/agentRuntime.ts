@@ -658,7 +658,7 @@ export class AgentRuntime {
             if (this.isInactive(run)) return this.toSnapshot(run)
             if (
               result && !result.ok &&
-              !isCancelledResult(result) && !result.needsUserInput
+              !isCancelledResult(result) && !result.needsUserInput && !result.retryable
             ) {
               return this.failAfterToolFailure(run, result.message)
             }
