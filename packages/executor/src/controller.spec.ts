@@ -150,7 +150,7 @@ describe('PageController —— 禁用元素', () => {
 })
 
 describe('PageController —— 下拉选择', () => {
-  it('按可见文本选中选项', () => {
+  it('按可见文本选中选项', async () => {
     render(`
       <select aria-label="状态">
         <option value="1">待审核</option>
@@ -160,17 +160,89 @@ describe('PageController —— 下拉选择', () => {
     const controller = new PageController()
     controller.capture()
 
-    controller.select(0, '已通过')
+    await controller.select(0, '已通过')
 
     expect((document.querySelector('select') as HTMLSelectElement).value).toBe('2')
   })
 
-  it('选项不存在时报错并列出可选项', () => {
+  it('选项不存在时报错并列出可选项', async () => {
     render('<select aria-label="状态"><option value="1">待审核</option></select>')
     const controller = new PageController()
     controller.capture()
 
-    expect(() => controller.select(0, '不存在')).toThrow(/待审核/)
+    await expect(controller.select(0, '不存在')).rejects.toThrow(/待审核/)
+  })
+})
+
+/**
+ * 组件库（AntD / Element Plus / 各家自研）的下拉几乎都不是原生 `<select>`，而是
+ * 「readonly input 或 combobox 触发器 + 浮层里的 role=option」。只支持原生 select
+ * 会让这类控件变成死路：input 原语拒绝它（只读），select 原语也拒绝它（不是 select），
+ * 模型两头碰壁后会宣布自己无法操作系统——真实接入实测到的正是这一幕。
+ *
+ * 用 `role="option"` 作为契约而不是各家 class 名：ARIA 角色是组件库共同遵守的东西，
+ * 绑 class 名等于每接一个新 UI 库就要改一次代码。
+ */
+describe('PageController —— 复合下拉（组件库）', () => {
+  /** 点击触发器后异步挂出浮层，模拟组件库的真实时序。 */
+  function mountCombobox(options: string[]): { picked: string[] } {
+    const picked: string[] = []
+    render('<input readonly role="combobox" aria-expanded="false" aria-label="角色">')
+    const trigger = document.querySelector('input') as HTMLInputElement
+    trigger.addEventListener('click', () => {
+      if (trigger.getAttribute('aria-expanded') === 'true') return
+      trigger.setAttribute('aria-expanded', 'true')
+      const popup = document.createElement('div')
+      popup.setAttribute('role', 'listbox')
+      options.forEach(text => {
+        const option = document.createElement('div')
+        option.setAttribute('role', 'option')
+        option.textContent = text
+        option.addEventListener('click', () => {
+          picked.push(text)
+          trigger.value = text
+          trigger.setAttribute('aria-expanded', 'false')
+          popup.remove()
+        })
+        popup.appendChild(option)
+      })
+      document.body.appendChild(popup)
+    })
+    return { picked }
+  }
+
+  it('点开浮层后按可见文本选中 role=option', async () => {
+    const { picked } = mountCombobox(['管理员', '坐席', '质检'])
+    const controller = new PageController()
+    controller.capture()
+
+    await controller.select(0, '坐席')
+
+    expect(picked).toEqual(['坐席'])
+    expect((document.querySelector('input') as HTMLInputElement).value).toBe('坐席')
+  })
+
+  it('浮层里没有目标选项时报错并列出实际可选项', async () => {
+    mountCombobox(['管理员', '坐席'])
+    const controller = new PageController()
+    controller.capture()
+
+    await expect(controller.select(0, '不存在')).rejects.toThrow(/管理员、坐席/)
+  })
+
+  it('隐藏的浮层选项不参与匹配', async () => {
+    // 组件库常把上一个下拉的浮层留在 DOM 里只做隐藏。拿它来匹配会点到一个用户
+    // 看不见的选项上，而工具照样报成功——比选不中危险得多。
+    render(`
+      <div role="listbox" style="display: none">
+        <div role="option">陈旧选项</div>
+      </div>
+      <input readonly role="combobox" aria-label="角色">
+    `)
+    const controller = new PageController()
+    controller.capture()
+
+    await expect(controller.select(0, '陈旧选项')).rejects.toThrow(/没有可选项|陈旧选项/)
   })
 })
 

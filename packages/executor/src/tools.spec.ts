@@ -19,8 +19,15 @@ function toolNamed(controller: PageController, name: string) {
   if (!tool) throw new Error(`没有名为 ${name} 的原语`)
   return (input: unknown) =>
     (tool.execute as (ctx: unknown, input: unknown) => Promise<{
-      ok: boolean, message: string
+      ok: boolean, message: string, data?: string, retryable?: true
     }>)({}, input)
+}
+
+function render(html: string): void {
+  const parsed = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html')
+  document.body.replaceChildren(
+    ...Array.from(parsed.body.childNodes).map(node => document.importNode(node, true))
+  )
 }
 
 beforeEach(() => {
@@ -110,6 +117,132 @@ describe('可纠正的失败以结果回喂，而不是抛出', () => {
 
     expect(result.ok).toBe(true)
     expect(clicked).toBe(true)
+  })
+})
+
+/**
+ * 动作必须自带执行后的页面。
+ *
+ * 不带的话，模型每做一个动作就得再花一轮读页面。一次「新建员工」有二十来个动作，
+ * 轮数直接翻倍，而每一轮都是一次模型往返——真实接入实测：Run 点了两三下就被预算
+ * 掐断，用户看到的是助手做到一半停下来让他「接着点」。
+ *
+ * 顺带解决索引失效：结果里的清单永远是最新的，模型没有机会沿用上一轮的索引。
+ */
+describe('动作自带执行后的页面', () => {
+  it('点击后返回的是操作之后的页面，不是操作之前的', async () => {
+    render('<button>打开表单</button>')
+    document.querySelector('button')?.addEventListener('click', () => {
+      render('<input aria-label="姓名"><button>保存</button>')
+    })
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    const result = await toolNamed(controller, 'click')({ index: 0 })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toContain('保存')
+    expect(result.data).not.toContain('打开表单')
+  })
+
+  it('输入后返回新页面清单', async () => {
+    render('<input aria-label="姓名">')
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    const result = await toolNamed(controller, 'input')({ index: 0, text: '张三' })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toContain('姓名')
+  })
+
+  it('滚动后返回新页面清单', async () => {
+    render('<button>甲</button>')
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    const result = await toolNamed(controller, 'scroll')({ pages: 1 })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toContain('甲')
+  })
+
+  it('复合下拉选中后返回新页面清单', async () => {
+    render(`
+      <input readonly role="combobox" aria-expanded="false" aria-label="角色">
+      <div role="listbox"><div role="option">坐席</div></div>
+    `)
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    const result = await toolNamed(controller, 'select')({ index: 0, option: '坐席' })
+
+    expect(result.ok).toBe(true)
+    expect(result.data).toContain('角色')
+  })
+
+  it('失败时不带页面，只回可纠正的指引', async () => {
+    render('<button>甲</button>')
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    const result = await toolNamed(controller, 'click')({ index: 9 })
+
+    expect(result.ok).toBe(false)
+    expect(result.retryable).toBe(true)
+    expect(result.data).toBeUndefined()
+  })
+})
+
+/**
+ * 动作描述用业务语言，不带元素下标。
+ *
+ * 这条 message 有两个去处，两边都受不了下标：界面上它就是给用户看的进度
+ * （「已点击 [9]」什么也说明不了），历史里它是模型判断「我刚才干了什么」的依据
+ * ——而下标不是事实，元素上写着的字才是。
+ */
+describe('动作描述用业务语言', () => {
+  it('点击报出元素名而不是索引', async () => {
+    render('<button>员工管理</button>')
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    const result = await toolNamed(controller, 'click')({ index: 0 })
+
+    expect(result.message).toBe('已点击「员工管理」')
+  })
+
+  it('点击后元素消失也不影响描述——名字在动作前就取好了', async () => {
+    render('<button>员工管理</button>')
+    document.querySelector('button')?.addEventListener('click', () => {
+      render('<div>员工列表</div>')
+    })
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    const result = await toolNamed(controller, 'click')({ index: 0 })
+
+    expect(result.message).toBe('已点击「员工管理」')
+  })
+
+  it('输入报出字段名与填入的值', async () => {
+    render('<input aria-label="姓名">')
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    const result = await toolNamed(controller, 'input')({ index: 0, text: '张三' })
+
+    expect(result.message).toBe('已填写「姓名」：张三')
+  })
+
+  it('元素没有可用名称时退化成序号，而不是报个空名字', async () => {
+    render('<button></button>')
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    const result = await toolNamed(controller, 'click')({ index: 0 })
+
+    expect(result.message).toBe('已点击第 0 项')
   })
 })
 

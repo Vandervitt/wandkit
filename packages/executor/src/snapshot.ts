@@ -527,6 +527,18 @@ function isTopElement(element: Element, cache: MeasureCache): boolean {
   })
 }
 
+/**
+ * 单个元素是否可见。
+ *
+ * 供快照之外的调用方（如控制器在浮层里找选项）复用同一套判定。抓取路径不要走这里：
+ * 它每次自建缓存，逐个调用在整页规模上会退化成 O(n) 次样式计算。
+ */
+export function isElementVisible(element: Element): boolean {
+  const doc = element.ownerDocument
+  const cache = new MeasureCache(doc?.defaultView ?? null)
+  return isVisible(element, cache, hasLayout(doc, cache))
+}
+
 /** 读取当前页面。 */
 export function capturePage(
   root: ParentNode = document,
@@ -724,7 +736,7 @@ function isReadonly(element: Element): boolean {
  * 这是模型识别元素用途的**唯一**依据，因此每一档都不能省：真实后台里既有规规矩矩
  * 写了 `aria-label` 的，也有全靠 `<label for>` 或 placeholder 撑着的。
  */
-function accessibleName(element: Element, cache?: MeasureCache): string {
+export function accessibleName(element: Element, cache?: MeasureCache): string {
   const ariaLabel = element.getAttribute('aria-label')
   if (ariaLabel?.trim()) return collapse(ariaLabel)
 

@@ -17,15 +17,25 @@ import { PageActionError, PageController } from './controller'
  * 永远不可能成功的动作，而 bug 被彻底掩盖。
  */
 async function guided(
+  controller: PageController,
   run: () => void | Promise<void>,
   describe: () => string
-): Promise<{ ok: boolean, message: string, retryable?: true }> {
+): Promise<{ ok: boolean, message: string, data?: string, retryable?: true }> {
   try {
     await run()
-    return { ok: true, message: describe() }
+    // 成功后**必须**带上执行之后的页面：不带的话模型每做一个动作就得再花一轮读页面，
+    // 一次「新建员工」二十来个动作，模型往返直接翻倍。真实接入实测：Run 点了两三下
+    // 就被预算掐断，用户看到的是助手做到一半停下来让他「接着点」。
+    //
+    // 顺带把「索引失效」整类问题消掉：结果里的清单永远是最新的，模型没有机会沿用
+    // 上一轮的索引。
+    return { ok: true, message: describe(), data: await controller.formatStable() }
   } catch (error) {
     if (error instanceof PageActionError) {
       // retryable 是关键：没有它，`ok: false` 同样会终结整个 Run，指引写得再好也没人看。
+      //
+      // 失败路径**不带页面**：动作没生效，页面就是模型上一轮已经看过的那份，重复回传
+      // 只是白烧 token，还会让历史里堆起多份难以分辨新旧的清单。
       return { ok: false, message: error.message, retryable: true }
     }
     throw error
@@ -74,8 +84,8 @@ export function createPageTools(options: PageToolOptions): ToolDefinition[] {
     version: 1,
     title: '读取当前页面',
     description: '读取当前页面上所有可交互元素，返回带索引的清单。'
-      + '每次要操作页面之前都必须先调用它——上一步操作很可能已经改变了页面，'
-      + '沿用旧索引会点到错误的元素。',
+      + '只在还没有任何索引时调用它（会话刚开始，或上一步动作失败了）。'
+      + '动作成功后会自带最新清单，无需再调用本工具。',
     schema: Type.Object({}, { additionalProperties: false }),
     execute: async () => {
       const text = controller.format()
@@ -88,14 +98,20 @@ export function createPageTools(options: PageToolOptions): ToolDefinition[] {
     name: 'click',
     version: 1,
     title: '点击元素',
-    description: '点击指定索引的元素。索引来自最近一次「读取当前页面」的结果。',
+    description: '点击指定索引的元素，并返回点击之后的最新页面清单。'
+      + '索引取自最近一次返回的清单。',
     schema: Type.Object({
       index: Type.Integer({ description: '元素索引', minimum: 0 })
     }, { additionalProperties: false }),
-    execute: async (_ctx, input: { index: number }) => guided(
-      () => controller.click(input.index),
-      () => `已点击 [${input.index}]`
-    )
+    execute: async (_ctx, input: { index: number }) => {
+      // 名字必须在动作**之前**取：点击往往让元素当场从文档里消失，事后取就是空的。
+      const label = controller.label(input.index)
+      return guided(
+        controller,
+        () => controller.click(input.index),
+        () => label ? `已点击「${label}」` : `已点击第 ${input.index} 项`
+      )
+    }
   })
 
   const inputText = defineReadTool({
@@ -103,15 +119,21 @@ export function createPageTools(options: PageToolOptions): ToolDefinition[] {
     name: 'input',
     version: 1,
     title: '输入文本',
-    description: '向指定索引的输入框填入文本，会覆盖原有内容。',
+    description: '向指定索引的输入框填入文本（覆盖原有内容），并返回填入之后的最新页面清单。',
     schema: Type.Object({
       index: Type.Integer({ description: '元素索引', minimum: 0 }),
       text: Type.String({ description: '要填入的文本' })
     }, { additionalProperties: false }),
-    execute: async (_ctx, input: { index: number, text: string }) => guided(
-      () => controller.input(input.index, input.text),
-      () => `已在 [${input.index}] 填入「${input.text}」`
-    )
+    execute: async (_ctx, input: { index: number, text: string }) => {
+      const label = controller.label(input.index)
+      return guided(
+        controller,
+        () => controller.input(input.index, input.text),
+        () => label
+          ? `已填写「${label}」：${input.text}`
+          : `已在第 ${input.index} 项填入：${input.text}`
+      )
+    }
   })
 
   const selectOption = defineReadTool({
@@ -119,15 +141,23 @@ export function createPageTools(options: PageToolOptions): ToolDefinition[] {
     name: 'select',
     version: 1,
     title: '选择下拉项',
-    description: '在指定索引的下拉框中按可见文本选中一项。',
+    description: '在指定索引的下拉框中按可见文本选中一项，并返回选中之后的最新页面清单。'
+      + '原生下拉与组件库的下拉（只读输入框 / combobox + 浮层）都用本工具，'
+      + '不要用输入工具往只读的下拉框里填字。',
     schema: Type.Object({
       index: Type.Integer({ description: '元素索引', minimum: 0 }),
       option: Type.String({ description: '选项的可见文本' })
     }, { additionalProperties: false }),
-    execute: async (_ctx, input: { index: number, option: string }) => guided(
-      () => controller.select(input.index, input.option),
-      () => `已选择「${input.option}」`
-    )
+    execute: async (_ctx, input: { index: number, option: string }) => {
+      const label = controller.label(input.index)
+      return guided(
+        controller,
+        () => controller.select(input.index, input.option),
+        () => label
+          ? `已把「${label}」选为「${input.option}」`
+          : `已选择「${input.option}」`
+      )
+    }
   })
 
   const scrollPage = defineReadTool({
@@ -135,9 +165,9 @@ export function createPageTools(options: PageToolOptions): ToolDefinition[] {
     name: 'scroll',
     version: 1,
     title: '滚动',
-    description: '滚动页面或某个内部滚动区。'
-      + '读取页面只返回视口附近的元素，要找的东西不在清单里时先滚动再重新读取。'
-      + '快照中标为 scrollable 的元素是内部滚动区，页面滚动到不了，'
+    description: '滚动页面或某个内部滚动区，并返回滚动之后的最新页面清单。'
+      + '清单只覆盖视口附近的元素，要找的东西不在清单里时用本工具滚动。'
+      + '清单中标为 scrollable 的元素是内部滚动区，页面滚动到不了，'
       + '需要把它的索引传给 index。',
     schema: Type.Object({
       pages: Type.Optional(Type.Number({
@@ -149,10 +179,10 @@ export function createPageTools(options: PageToolOptions): ToolDefinition[] {
       }))
     }, { additionalProperties: false }),
     execute: async (_ctx, input: { pages?: number, index?: number }) => guided(
+      controller,
       () => controller.scroll(input.pages ?? 1, input.index),
-      () => input.index === undefined
-        ? `已滚动页面 ${input.pages ?? 1} 屏`
-        : `已滚动 [${input.index}] ${input.pages ?? 1} 屏`
+      // 滚动对用户是纯粹的内部动作，说清方向即可，不必暴露容器下标。
+      () => (input.pages ?? 1) < 0 ? '已向上翻页' : '已向下翻页'
     )
   })
 

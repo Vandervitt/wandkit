@@ -1,6 +1,8 @@
 import {
+  accessibleName,
   capturePageWithElements,
   formatSnapshot,
+  isElementVisible,
   type CaptureOptions,
   type PageSnapshot
 } from './snapshot'
@@ -107,10 +109,37 @@ export class PageController {
     return formatSnapshot(this.capture(root))
   }
 
+  /**
+   * 等 DOM 稳定后的文本快照。动作之后用它。
+   *
+   * 动作立刻抓到的往往是半成品：弹窗还在做进场动画、路由切过去了但内容没渲染完。
+   * 把这种快照回给模型，它会基于一份即将作废的清单挑索引。
+   */
+  async formatStable(root: ParentNode = document): Promise<string> {
+    return formatSnapshot(await this.captureStable(root))
+  }
+
   /** 停止路由侦测并还原被包装的 history 方法。 */
   dispose(): void {
     this.routeWatcher?.stop()
     this.routeWatcher = undefined
+  }
+
+  /**
+   * 某个索引对应元素的可见名称，用于把动作描述成业务语言。
+   *
+   * 「已点击 [9]」既没法让用户看懂正在发生什么，回喂给模型时也不构成任何依据——
+   * 下标不是事实，元素上写着的字才是。取不到名字时返回空串，由调用方决定怎么退化。
+   *
+   * **必须在动作之前取**：点击往往会让元素当场从文档里消失，事后再取就是空的。
+   */
+  label(index: number): string {
+    try {
+      return accessibleName(this.elementAt(index))
+    } catch (_error) {
+      // 取名字失败不该阻断动作本身——真正的索引校验在动作里做，报错也由它来报。
+      return ''
+    }
   }
 
   click(index: number): void {
@@ -139,21 +168,75 @@ export class PageController {
     field.dispatchEvent(new Event('change', { bubbles: true }))
   }
 
-  select(index: number, optionText: string): void {
+  /**
+   * 按可见文本选中一项，原生 `<select>` 与组件库的复合下拉都走这里。
+   *
+   * **复合下拉必须支持**，否则它是一条死路：AntD / Element Plus 之流用
+   * 「readonly input（或 combobox）+ 浮层」实现下拉，`input` 原语因只读而拒绝它，
+   * 原来的 `select` 又因不是 `<select>` 而拒绝它——模型两头碰壁，随后开始声称自己
+   * 无法操作这个系统。真实接入实测到的正是这一幕（新建员工表单的「角色」字段）。
+   */
+  async select(index: number, optionText: string): Promise<void> {
     const element = this.elementAt(index)
     assertEnabled(element)
-    if (element.tagName.toLowerCase() !== 'select') {
-      throw new PageActionError(`索引 ${index} 的元素不是下拉框`)
+    if (element.tagName.toLowerCase() === 'select') {
+      selectNative(element as HTMLSelectElement, optionText)
+      return
     }
-    const select = element as HTMLSelectElement
-    const options = Array.from(select.options)
-    const matched = options.find(option => option.textContent?.trim() === optionText)
+    await this.selectFromPopup(element, optionText)
+  }
+
+  /**
+   * 复合下拉：点开触发器 → 在浮层里按可见文本点中选项。
+   *
+   * 认 `role="option"` 而不认各家 class 名。ARIA 角色是组件库共同遵守的契约，绑
+   * class 名等于每接一个新 UI 库就得改一次代码。
+   */
+  private async selectFromPopup(trigger: Element, optionText: string): Promise<void> {
+    if (trigger.getAttribute('aria-expanded') !== 'true') {
+      ;(trigger as HTMLElement).click()
+      // 浮层普遍是异步挂载的，立刻查会一无所获。
+      await waitForDomStable(this.options.stable)
+    }
+
+    const options = this.popupOptions(trigger)
+    if (options.length === 0) {
+      throw new PageActionError(
+        `索引处的元素不是下拉框，点开后也没有可选项（${trigger.tagName.toLowerCase()}）`
+      )
+    }
+
+    const matched = options.find(option => optionLabel(option) === optionText)
+      // 组件库常在选项里塞图标、勾选标记一类的附加文本，精确匹配会漏掉本该命中的项。
+      // 精确优先、包含兜底：反过来会让「坐席」抢先匹配到「坐席组长」。
+      ?? options.find(option => optionLabel(option).includes(optionText))
     if (!matched) {
-      const available = options.map(option => option.textContent?.trim()).join('、')
+      const available = options.map(optionLabel).join('、')
       throw new PageActionError(`没有名为「${optionText}」的选项。可选：${available}`)
     }
-    select.value = matched.value
-    select.dispatchEvent(new Event('change', { bubbles: true }))
+
+    ;(matched as HTMLElement).click()
+    // 选中后浮层收起、表单值回填，都可能是异步的。等稳定再交还，随后的快照才是终态。
+    await waitForDomStable(this.options.stable)
+  }
+
+  /**
+   * 收集浮层中当前可选的项。
+   *
+   * 两处过滤都不能省：
+   * - **可见性**——组件库常把上一个下拉的浮层留在 DOM 里只做隐藏。拿它匹配会点到
+   *   用户根本看不见的选项上，而工具照样回报成功，比选不中危险得多。
+   * - **禁用**——`aria-disabled` 的项点了没有任何效果，同样是假成功。
+   */
+  private popupOptions(trigger: Element): Element[] {
+    const doc = trigger.ownerDocument
+    // 触发器显式指向某个浮层时优先用它：页面上同时开着多个下拉时，全局搜集会串台。
+    const ownedId = trigger.getAttribute('aria-controls') ?? trigger.getAttribute('aria-owns')
+    const scope = (ownedId && doc.getElementById(ownedId)) || doc
+    const found = Array.from(scope.querySelectorAll('[role="option"]'))
+    return found.filter(
+      option => isElementVisible(option) && option.getAttribute('aria-disabled') !== 'true'
+    )
   }
 
   /**
@@ -252,6 +335,22 @@ export class PageController {
     }
     return element
   }
+}
+
+function selectNative(select: HTMLSelectElement, optionText: string): void {
+  const options = Array.from(select.options)
+  const matched = options.find(option => option.textContent?.trim() === optionText)
+  if (!matched) {
+    const available = options.map(option => option.textContent?.trim()).join('、')
+    throw new PageActionError(`没有名为「${optionText}」的选项。可选：${available}`)
+  }
+  select.value = matched.value
+  select.dispatchEvent(new Event('change', { bubbles: true }))
+}
+
+/** 选项的可见文本。优先 `aria-label`：图标型选项的 `textContent` 可能是空的。 */
+function optionLabel(option: Element): string {
+  return (option.getAttribute('aria-label') ?? option.textContent ?? '').trim()
 }
 
 function isTextInput(element: Element): boolean {
