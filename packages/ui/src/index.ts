@@ -26,6 +26,10 @@ export type {
 export {
   InteractionMask,
   ToolairlockMaskElement,
-  MASK_TAG
+  MASK_TAG,
+  MASK_LAYER
 } from './mask'
 export type { InteractionMaskOptions } from './mask'
+
+export { withMaskReleased, createMaskReleaser } from './maskRelease'
+export type { ReleasableMask } from './maskRelease'

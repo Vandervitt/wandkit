@@ -18,13 +18,18 @@ export interface InteractionMaskOptions {
 }
 
 /**
- * 顶到 32 位有符号整数上限。
+ * 遮罩层级。
+ *
+ * 刻意比 32 位有符号上限低一档，**给治理界面留出位置**——确认卡片必须排在遮罩
+ * 之上，否则用户点不到自己的闸门，Run 就此卡在等待确认（真实接入实测过）。
+ *
+ * 除此之外仍要压过宿主的一切弹层。
  *
  * 必须压过宿主的一切弹层——Element UI、Ant Design 这类组件库的 z-index 常年在
  * 2000~3000,而老后台里手写 9999 的也不少。只要有一个弹层盖在遮罩之上，用户就能
  * 点到下面的业务按钮，「窗口内的请求必然来自 Agent」这个前提当场失效。
  */
-const TOP_LAYER = 2147483647
+export const MASK_LAYER = 2147483646
 
 /** 被吞掉的事件。覆盖指针、键盘与触摸三条输入路径。 */
 const BLOCKED_EVENTS = [
@@ -38,7 +43,7 @@ const STYLE = `
 [part="overlay"] {
   position: fixed;
   inset: 0;
-  z-index: ${TOP_LAYER};
+  z-index: ${MASK_LAYER};
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -135,7 +140,7 @@ export class InteractionMask {
     // 同时写进内联样式：宿主若因 CSP 丢掉了 <style>，拦截能力也不能跟着丢。
     overlay.style.position = 'fixed'
     overlay.style.inset = '0'
-    overlay.style.zIndex = String(TOP_LAYER)
+    overlay.style.zIndex = String(MASK_LAYER)
 
     const label = document.createElement('div')
     label.setAttribute('part', 'label')

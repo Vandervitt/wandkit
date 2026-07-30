@@ -33,7 +33,10 @@ describe('交互遮罩', () => {
       expect(overlay.style.inset).toBe('0px')
       // 必须压过宿主所有弹层，否则用户仍能点到下面的业务按钮，
       // 「窗口内的请求必然来自 Agent」这个前提就不成立了。
-      expect(Number(overlay.style.zIndex)).toBe(2147483647)
+      // 组件库的 z-index 常年在 2000~3000，老后台里手写 9999 的也不少。
+      expect(Number(overlay.style.zIndex)).toBeGreaterThan(100000)
+      // 但要给治理界面留一档——确认卡片必须能压过遮罩，否则用户点不到闸门。
+      expect(Number(overlay.style.zIndex)).toBeLessThan(2147483647)
     })
 
     it('吞掉指针与键盘事件，不让它们抵达业务页面', () => {
