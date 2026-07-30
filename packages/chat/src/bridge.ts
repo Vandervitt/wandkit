@@ -26,7 +26,11 @@ export interface RuntimeUiEventLike {
   toolCallId?: string
   result?: { ok: boolean, message: string }
   cancelled?: boolean
-  /** 终态原因。核心当前放在 trace 里，宿主转发时可一并带上。 */
+  /**
+   * 终态原因。核心的终态 `state` 事件会带上，宿主原样转发即可。
+   *
+   * 拿不到也没关系——桥接层有兜底文案。不能接受的是拿不到就什么都不说。
+   */
   stopReason?: string
 }
 
@@ -38,6 +42,19 @@ export interface RuntimeLike {
   stop(): void
 }
 
+/** 桥接层自己需要的兜底文案。都是「上游什么都没说」时才会用到的。 */
+export interface ChatBridgeMessages {
+  /** Run 失败但上游没给原因时的兜底。 */
+  runFailed: string
+  /** 一轮跑完却没有任何可展示的回答。 */
+  emptyAnswer: string
+}
+
+export const defaultBridgeMessages: ChatBridgeMessages = {
+  runFailed: '这一轮没能完成，请稍后重试。',
+  emptyAnswer: '这一轮没有得到回答，请再说一次或换个说法。'
+}
+
 export interface ConnectRuntimeOptions {
   /**
    * 注册事件回调。
@@ -46,6 +63,8 @@ export interface ConnectRuntimeOptions {
    * 回调，运行时本身没有 `on()` 之类的订阅接口。宿主在自己的 `emit` 里转调即可。
    */
   onEvent(handler: (event: RuntimeUiEventLike) => void): void
+  /** 覆盖兜底文案。 */
+  messages?: Partial<ChatBridgeMessages>
 }
 
 /** 界面可以对会话做的事。 */
@@ -73,11 +92,20 @@ export function connectRuntime(
   options: ConnectRuntimeOptions
 ): ChatControls {
   let disposed = false
+  const messages = { ...defaultBridgeMessages, ...options.messages }
+  /**
+   * 本轮是否已经产出过给用户看的文字。
+   *
+   * 用来兜住「跑完了却一片空白」：小参数量模型偶发最终轮既无 tool_calls、content 也
+   * 为空，事件被整条丢弃后 Run 照样 completed，界面上什么都没多出来。
+   */
+  let answered = false
 
   options.onEvent(event => {
     if (disposed) return
     switch (event.type) {
       case 'assistant':
+        if (event.content) answered = true
         // content 为 null 且无工具调用时才整条跳过——那是纯思维链，不该展示。
         // 但只要带了 tool_calls 就必须落成消息：否则随后的 tool 结果会变成没有
         // 发起者的孤儿，导出的历史在 OpenAI 协议下非法。
@@ -102,10 +130,11 @@ export function connectRuntime(
         if (event.confirmation) session.requestConfirmation(event.confirmation)
         break
       case 'state':
-        applyRunStatus(session, event)
+        applyRunStatus(session, event, messages, answered)
         break
       case 'clear':
         session.clear()
+        answered = false
         break
     }
   })
@@ -126,6 +155,8 @@ export function connectRuntime(
 
   return {
     async send(text) {
+      // 新的一轮重新开始计「有没有回答过」。批准/拒绝不重置：那是同一轮的延续。
+      answered = false
       session.appendUser(text)
       await guard(() => runtime.start(text))
     },
@@ -147,7 +178,21 @@ export function connectRuntime(
   }
 }
 
-function applyRunStatus(session: ChatSession, event: RuntimeUiEventLike): void {
+/**
+ * 把 Run 状态翻译成界面状态。
+ *
+ * 这里有一条不可退让的规则：**Run 结束时用户必须得到反馈**。曾经失败路径依赖上游
+ * 传 `stopReason`，而核心当时根本不发这个字段，于是每次失败都落进「静静切回 idle」，
+ * 表现出来就是「Agent 老是没有回复」。原因拿不到是可以接受的，悄无声息不行。
+ *
+ * @param answered 本轮是否已产出过给用户看的文字。
+ */
+function applyRunStatus(
+  session: ChatSession,
+  event: RuntimeUiEventLike,
+  messages: ChatBridgeMessages,
+  answered: boolean
+): void {
   const status = event.snapshot?.status
   if (!status) return
   if (status === 'awaiting_confirmation') return
@@ -155,8 +200,13 @@ function applyRunStatus(session: ChatSession, event: RuntimeUiEventLike): void {
     session.setStatus('busy')
     return
   }
-  if (status === 'failed' && event.stopReason) {
-    session.fail(event.stopReason)
+  if (status === 'failed') {
+    session.fail(event.stopReason || messages.runFailed)
+    return
+  }
+  // 用户主动取消不算异常，不该报错；跑完了却没有回答则必须说出来。
+  if (status === 'completed' && !answered) {
+    session.fail(messages.emptyAnswer)
     return
   }
   session.setStatus('idle')

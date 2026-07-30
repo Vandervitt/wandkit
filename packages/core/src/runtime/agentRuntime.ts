@@ -58,6 +58,15 @@ export interface RuntimeUiEvent {
   toolCallId?: string
   result?: ToolResult
   cancelled?: boolean
+  /**
+   * Run 为何终止。只在终态的 `state` 事件上出现。
+   *
+   * **界面必须能拿到它。** 曾经这个原因只写进 trace，`state` 事件里没有对应字段，
+   * 于是消费方除了「状态变成 failed」以外一无所知，只能静静把界面切回可输入——
+   * 用户看到的是发一句话、转几秒、屏幕上什么都没多出来，也就是「Agent 不回复」。
+   * trace 是给事后审计的，不能同时充当唯一的用户反馈通道。
+   */
+  stopReason?: string
 }
 
 /**
@@ -170,6 +179,22 @@ interface RunFailure {
 }
 
 const terminalStatuses: RunStatus[] = ['completed', 'failed', 'cancelled']
+
+/** 兜底失败原因里附带的原始错误上限。够定位问题，又不至于把一整页 HTML 灌进气泡。 */
+const FAILURE_DETAIL_MAX_LENGTH = 300
+
+/**
+ * 给兜底失败补上原始错误。
+ *
+ * 只发 `runFailed` 那句「请稍后重试」，等于把唯一有诊断价值的信息丢掉：LLM 后端没起、
+ * Key 过期、请求被闸门拦下，在界面和 trace 里都长成同一句话，接入方只能靠猜。
+ */
+function describeUnexpectedFailure(fallback: string, error: unknown): string {
+  const detail = (error instanceof Error ? error.message : String(error ?? ''))
+    .trim()
+    .slice(0, FAILURE_DETAIL_MAX_LENGTH)
+  return detail ? `${fallback}（${detail}）` : fallback
+}
 
 /**
  * 调度器：把用户的一句话，变成一串受管控的工具调用。
@@ -668,7 +693,10 @@ export class AgentRuntime {
         this.historyStore.rollbackToSafePoint()
         return this.finish(run, 'cancelled', this.messages.stoppedByUser)
       }
-      return this.fail(run, { kind: 'run_failed', message: this.messages.runFailed })
+      return this.fail(run, {
+        kind: 'run_failed',
+        message: describeUnexpectedFailure(this.messages.runFailed, error)
+      })
     }
   }
 
@@ -1099,7 +1127,7 @@ export class AgentRuntime {
       this.previousModuleIds = [...run.previousModuleIds]
     }
     this.confirmations.clear()
-    this.publishState(run)
+    this.publishState(run, reason)
     return this.toSnapshot(run)
   }
 
@@ -1153,13 +1181,17 @@ export class AgentRuntime {
     if (publish) this.publishState(run)
   }
 
-  private publishState(run: ActiveRun): void {
+  /**
+   * @param stopReason 终态原因。非终态的状态变化没有原因可言，留空即可。
+   */
+  private publishState(run: ActiveRun, stopReason?: string): void {
     if (this.active !== run) return
     const snapshot = this.toSnapshot(run)
     this.dependencies.emit({
       type: 'state',
       snapshot,
-      activeModuleIds: [...run.previousModuleIds]
+      activeModuleIds: [...run.previousModuleIds],
+      ...(stopReason ? { stopReason } : {})
     })
   }
 

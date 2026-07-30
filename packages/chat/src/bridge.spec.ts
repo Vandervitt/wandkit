@@ -180,6 +180,64 @@ describe('运行时事件 → 会话状态', () => {
     expect(session.state.error).toBe('达到最大轮次')
   })
 
+  it('失败终态没带原因时也必须留下可见的错误', () => {
+    // 真实接入实测的缺陷根因：核心的 `state` 事件从来不带 `stopReason`（原因只进
+    // trace），于是每一次失败都落到「静静切回 idle」这条路上。用户看到的是发一句话、
+    // 转几秒、屏幕上什么都没多出来——也就是「Agent 不回复」。
+    //
+    // 桥接层不能依赖上游一定会带原因：拿不到原因是可以的，悄无声息不行。
+    const { runtime, onEvent } = createRuntime()
+    connectRuntime(session, runtime, { onEvent })
+
+    runtime.emit({ type: 'state', snapshot: { runId: 'r', traceId: 't', status: 'failed' } })
+
+    expect(session.state.status).toBe('idle')
+    expect(session.state.error).toBeTruthy()
+  })
+
+  it('一轮跑完却没有任何回答时，不能让界面空手交还给用户', () => {
+    // 小参数量模型偶发的空回答：最终轮既没有 tool_calls，content 也是空的。
+    // 事件被整条丢弃后 Run 正常 completed，界面同样是一片空白。
+    const { runtime, onEvent } = createRuntime()
+    connectRuntime(session, runtime, { onEvent })
+
+    runtime.emit({ type: 'state', snapshot: { runId: 'r', traceId: 't', status: 'thinking' } })
+    runtime.emit({ type: 'assistant', content: '' })
+    runtime.emit({ type: 'state', snapshot: { runId: 'r', traceId: 't', status: 'completed' } })
+
+    expect(session.state.status).toBe('idle')
+    expect(session.state.error).toBeTruthy()
+  })
+
+  it('有回答的一轮跑完后不留错误', () => {
+    // 上一条的对照：正常回答不该被兜底逻辑误报成异常。
+    const { runtime, onEvent } = createRuntime()
+    connectRuntime(session, runtime, { onEvent })
+
+    runtime.emit({ type: 'state', snapshot: { runId: 'r', traceId: 't', status: 'thinking' } })
+    runtime.emit({ type: 'assistant', content: '共 2 条' })
+    runtime.emit({ type: 'state', snapshot: { runId: 'r', traceId: 't', status: 'completed' } })
+
+    expect(session.state.error).toBeUndefined()
+    expect(session.state.status).toBe('idle')
+  })
+
+  it('工具调用轮次的 null content 不算「有回答」，但也不误报空回答', () => {
+    // null 是思维链轮次，本身不该展示；只要这一轮最终给出了文字回答就不算空手。
+    const { runtime, onEvent } = createRuntime()
+    connectRuntime(session, runtime, { onEvent })
+
+    runtime.emit({ type: 'state', snapshot: { runId: 'r', traceId: 't', status: 'thinking' } })
+    runtime.emit({ type: 'assistant', content: null, toolCalls: [{
+      id: 'c1', type: 'function', function: { name: 'f', arguments: '{}' }
+    }] })
+    runtime.emit({ type: 'tool_result', toolCallId: 'c1', result: { ok: true, message: '命中 1 条' } })
+    runtime.emit({ type: 'assistant', content: '共 1 条' })
+    runtime.emit({ type: 'state', snapshot: { runId: 'r', traceId: 't', status: 'completed' } })
+
+    expect(session.state.error).toBeUndefined()
+  })
+
   it('clear 事件清空会话', () => {
     const { runtime, onEvent } = createRuntime()
     connectRuntime(session, runtime, { onEvent })
