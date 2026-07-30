@@ -162,19 +162,70 @@ export class PageController {
    * 给了 `index` 就滚那个容器——快照里标为 `scrollable` 的元素页面级滚动够不到，
    * 不单独支持的话它下半截的内容对 Agent 永远不存在。
    *
+   * **不给 `index` 时，整页滚不动就自动回退到页面内最大的滚动容器。** 管理后台几乎
+   * 都是这个布局：`window` 完全不滚，内容区是独立的 `overflow` 容器。而模型分不清该
+   * 滚哪一个——真实接入实测：说「往下滚」时它滚了整页，页面一动不动，于是它认定下面
+   * 没有内容了，转头去点一个名字相近的错误元素。
+   *
+   * 这个判断不该交给模型：**整页能不能滚是个可观测的事实**，代码自己看得出来，没必要
+   * 让它去猜。回退只在「整页确实滚不动」时发生，因此不会抢走本该滚整页的场景。
+   *
    * @param pages 滚动几屏，负数向上。
-   * @param index 目标容器在最近一次快照中的索引；缺省滚动整个页面。
+   * @param index 目标容器在最近一次快照中的索引；缺省先试整页，再回退到最大滚动容器。
    */
   scroll(pages = 1, index?: number): void {
     if (index !== undefined) {
-      const element = this.elementAt(index)
-      const box = element as HTMLElement
-      box.scrollBy({ top: box.clientHeight * pages, behavior: 'auto' })
+      this.scrollBox(this.elementAt(index) as HTMLElement, pages)
       return
     }
+
     const view = typeof window === 'undefined' ? undefined : window
     if (!view) return
-    view.scrollBy({ top: view.innerHeight * pages, behavior: 'auto' })
+
+    if (this.isPageScrollable(view)) {
+      view.scrollBy({ top: view.innerHeight * pages, behavior: 'auto' })
+      return
+    }
+
+    const fallback = this.largestScrollable()
+    if (fallback) this.scrollBox(fallback, pages)
+  }
+
+  private scrollBox(box: HTMLElement, pages: number): void {
+    box.scrollBy({ top: box.clientHeight * pages, behavior: 'auto' })
+  }
+
+  /** 整页是否真的有可滚的余量。`documentElement` 与 `body` 谁承载滚动都算。 */
+  private isPageScrollable(view: Window): boolean {
+    const doc = view.document
+    return [doc.documentElement, doc.body].some(
+      node => node && node.scrollHeight > node.clientHeight + 1
+    )
+  }
+
+  /**
+   * 页面内可滚区域中「最大」的那个，按可见面积算。
+   *
+   * 用面积而不是滚动高度选：侧边菜单常常也能滚，但它窄，而承载正文的那块总是最宽最高的
+   * 一块。挑错了会去滚菜单，页面正文依然不动。
+   */
+  private largestScrollable(): HTMLElement | undefined {
+    const view = typeof window === 'undefined' ? undefined : window
+    if (!view) return undefined
+
+    let best: HTMLElement | undefined
+    let bestArea = 0
+    view.document.querySelectorAll<HTMLElement>('*').forEach(node => {
+      if (node.scrollHeight <= node.clientHeight + 1) return
+      const overflowY = view.getComputedStyle(node).overflowY
+      if (overflowY !== 'auto' && overflowY !== 'scroll') return
+      const area = node.clientWidth * node.clientHeight
+      if (area > bestArea) {
+        bestArea = area
+        best = node
+      }
+    })
+    return best
   }
 
   /**
