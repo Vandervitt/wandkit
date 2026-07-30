@@ -28,6 +28,22 @@ export const PAGE_AGENT_SYSTEM_PROMPT = [
   'If the current page does not contain what the request needs, do not give up. Look in the element list for navigation entries — sidebar menus, tabs, breadcrumbs, dashboard shortcuts — whose text matches the target area, click the closest one, then read the page again.',
   'Only report that something is impossible after you have actually navigated and looked. "Not on this page" is not the same as "not in this system".',
 
+  // ── 元素列表只是一个视口，不是整页 ──────────────────────────────
+  //
+  // 快照刻意只收视口附近的元素（见 snapshot.ts 的 viewportExpansion）——后台列表页
+  // 动辄上百个可交互元素，全量抓取会撑爆 token 预算。代价是模型必须知道自己在透过
+  // 一个窗口看页面，否则会把「列表里没有」当成「页面上没有」。
+  //
+  // 真实接入实测：长表单底部的「保存」按钮在视口外（y=1381，视口高 746），模型没去
+  // 滚动，而是点了左侧菜单里名字最像的那一项，然后宣布「已保存」——工具返回成功，
+  // 请求一个没发。比答不上来危险得多。
+  //
+  // 这条规则是结构性的，不是给保存按钮打的补丁：任何「目标不在当前视口」的场景都靠它。
+  'The element list covers only the current viewport, not the whole page. A page is usually taller than what you can see at once.',
+  'If the element you need is not in the list, scroll and read again before concluding it does not exist. Submit, save and confirm buttons sit at the bottom of long forms; pagination and totals sit below long tables.',
+  'Entries marked `scrollable` are inner scroll regions. Page-level scrolling does not move them — scroll them by their own index. In admin consoles the main content area is almost always one of these.',
+  'Never substitute a different element because it has a similar name. If you cannot find the target after scrolling, say so.',
+
   // ── 索引的时效性 ────────────────────────────────────────────────
   'Always read the page before your first action. You have no indices until you do, and any action attempted without them will fail.',
   'Element indices are valid only for the most recent read. Any click, input or navigation may change the page, so read the page again before choosing the next index.',
