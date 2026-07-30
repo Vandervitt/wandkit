@@ -246,6 +246,64 @@ describe('动作描述用业务语言', () => {
   })
 })
 
+/**
+ * 表单校验没过时，动作不得回报成功。
+ *
+ * 真实接入实测的最严重缺陷：模型填完表单点「OK」，点击确实发生了，工具回报
+ * `已点击「OK」`，模型据此宣布「已成功添加新员工」。而密码不合规、角色没选，表单被
+ * 前端校验拦下，一个请求都没发出去——用户看到的是一句自信的成功，和一个红着两处
+ * 错误、什么也没提交的弹窗。假成功比做不到危险得多。
+ */
+describe('校验未通过时不报成功', () => {
+  it('动作后表单出现校验错误：回可纠正的失败并带上错误原文', async () => {
+    render(`
+      <form>
+        <input aria-label="密码">
+        <div role="alert">密码至少 6 位，需含字母、数字和特殊字符</div>
+        <div role="alert">请选择角色</div>
+        <button>OK</button>
+      </form>
+    `)
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    // 索引 1 是「OK」按钮：role="alert" 不可交互，不占索引。
+    const result = await toolNamed(controller, 'click')({ index: 1 })
+
+    expect(result.ok).toBe(false)
+    expect(result.retryable).toBe(true)
+    expect(result.message).toContain('未通过校验')
+    expect(result.message).toContain('请选择角色')
+    // 页面照给：模型需要它来定位要改的字段。
+    expect(result.data).toBeTruthy()
+  })
+
+  it('表单干净时照常报成功', async () => {
+    render('<form><input aria-label="密码"><button>OK</button></form>')
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    const result = await toolNamed(controller, 'click')({ index: 1 })
+
+    expect(result.ok).toBe(true)
+  })
+
+  it('表单外的 role=alert 是成功提示，不当成校验失败', async () => {
+    // `.ant-message` 之流同样用 role="alert"，但挂在 body 上、不在任何表单里。
+    // 不加这层限制，一次成功的保存会被判成失败——比漏报更糟，因为模型会去重试。
+    render(`
+      <div role="alert">添加成功</div>
+      <form><input aria-label="密码"><button>OK</button></form>
+    `)
+    const controller = new PageController({ watchRoute: false })
+    controller.capture()
+
+    const result = await toolNamed(controller, 'click')({ index: 1 })
+
+    expect(result.ok).toBe(true)
+  })
+})
+
 describe('只吞可纠正的失败，不吞程序缺陷', () => {
   it('控制器本身仍旧抛 PageActionError，语义没有被结果化掩盖', () => {
     const controller = new PageController({ watchRoute: false })

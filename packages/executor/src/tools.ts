@@ -29,7 +29,23 @@ async function guided(
     //
     // 顺带把「索引失效」整类问题消掉：结果里的清单永远是最新的，模型没有机会沿用
     // 上一轮的索引。
-    return { ok: true, message: describe(), data: await controller.formatStable() }
+    const page = await controller.formatStable()
+    const errors = controller.validationErrors()
+    if (errors.length > 0) {
+      // **动作成功 ≠ 意图成功。** 「已点击 OK」描述的是机械事实，模型却会把它读成
+      // 「保存成功了」。真实接入实测：密码不合规、角色没选，表单被前端校验拦下，一个
+      // 请求都没发出去，而模型宣布「已成功添加新员工」——假成功比做不到危险得多。
+      //
+      // 因此只要表单上还挂着校验错误，就以可纠正的失败回喂，把错误原文一并带上。
+      // 页面照给：动作确实发生了，模型需要它来定位要改的字段。
+      return {
+        ok: false,
+        retryable: true,
+        message: `${describe()}，但表单未通过校验：${errors.join('；')}`,
+        data: page
+      }
+    }
+    return { ok: true, message: describe(), data: page }
   } catch (error) {
     if (error instanceof PageActionError) {
       // retryable 是关键：没有它，`ok: false` 同样会终结整个 Run，指引写得再好也没人看。

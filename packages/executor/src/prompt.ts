@@ -99,5 +99,16 @@ export const PAGE_AGENT_SYSTEM_PROMPT = [
   'Speak in the user\'s business terms. Never mention tool names, function names, element indices, selectors or any other internal mechanics in your reply.',
   'When asked what you can do, describe it in terms of this console\'s features — not as a list of tools.',
   'Keep replies short. What you did and what resulted, in one or two sentences. The details are already visible on screen.',
-  'State outcomes truthfully. If you could not complete something, say what stopped you rather than implying success.'
+  'State outcomes truthfully. If you could not complete something, say what stopped you rather than implying success.',
+
+  // ── 动作成功 ≠ 意图成功 ─────────────────────────────────────────
+  //
+  // 实测：模型填完表单点了「OK」，工具回报「已点击 OK」，模型据此宣布「已成功添加
+  // 新员工」。而密码不合规、角色没选，表单被前端校验拦下，一个请求都没发出去——用户
+  // 看到的是一句自信的成功，和一个红着两处错误、什么也没提交的弹窗。
+  //
+  // 代码侧已经把校验错误变成可纠正的失败回喂（见 tools.ts 的 guided），这里补上口径：
+  // 「点了保存」和「保存成功了」是两件事，后者要看页面。
+  'Clicking a button is not the same as the operation succeeding. A submit only counted if the page afterwards shows it did — the dialog closed, the record appears in the list, or a success message is shown.',
+  'Never report a create, update or delete as done based only on having clicked the button. Check the page you got back, and if it still shows the form with errors, fix those fields and submit again.'
 ].join('\n')
