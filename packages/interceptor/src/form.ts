@@ -93,8 +93,13 @@ export function patchForm(
     }
 
     void gate(toInterceptedRequest(view, snapshot, nextId())).then(allowed => {
-      if (allowed && lifecycle.active && snapshotMatches(view, snapshot)) previous.call(this)
-    }).catch(() => undefined)
+      if (!allowed || !lifecycle.active || !snapshotMatches(view, snapshot)) return
+      try {
+        previous.call(this)
+      } catch (error) {
+        reportAsyncError(view, error)
+      }
+    }, () => undefined)
   } as typeof previous, 'form-submit', lifecycle, previous)
 
   try {
@@ -116,6 +121,13 @@ export function patchForm(
       prototype.submit = skipInactivePatches(previous, 'form-submit')
     }
   }
+}
+
+function reportAsyncError(
+  view: Window & typeof globalThis,
+  error: unknown
+): void {
+  view.queueMicrotask(() => { throw error })
 }
 
 function getOrCreateRegistry(view: Window & typeof globalThis): FormRegistry {
@@ -205,11 +217,17 @@ async function runEventContext(
       }
       approvedLayer = true
     }
-    if (approvedLayer) replaySubmission(view, registry, context.snapshot)
   } catch (_error) {
     // 表单事件没有可返回的 Promise；判定或快照异常按拒绝处理。
+    return
   } finally {
     registry.eventContexts.delete(event)
+  }
+  if (!approvedLayer) return
+  try {
+    replaySubmission(view, registry, context.snapshot)
+  } catch (error) {
+    reportAsyncError(view, error)
   }
 }
 
