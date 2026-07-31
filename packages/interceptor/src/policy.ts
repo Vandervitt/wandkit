@@ -143,12 +143,23 @@ function matchesMethod(
  */
 function matchesUrl(request: InterceptedRequest, matcher: RequestMatcher): boolean {
   if (matcher.url === undefined) return true
-  if (matcher.url instanceof RegExp) return matcher.url.test(request.url)
+  if (matcher.url instanceof RegExp) return testRegExp(matcher.url, request.url)
 
   const target = matcher.url.startsWith('/')
     ? pathnameOf(request.url)
     : request.url
   return compileUrlPattern(matcher.url).test(target)
+}
+
+function testRegExp(pattern: RegExp, value: string): boolean {
+  // RegExp 子类可以覆写 flags getter 或 exec()；直接使用原对象，只隔离匹配游标。
+  const lastIndex = pattern.lastIndex
+  try {
+    if (lastIndex !== 0) pattern.lastIndex = 0
+    return pattern.test(value)
+  } finally {
+    if (pattern.lastIndex !== lastIndex) pattern.lastIndex = lastIndex
+  }
 }
 
 function pathnameOf(url: string): string {

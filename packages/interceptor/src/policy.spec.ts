@@ -212,6 +212,62 @@ describe('evaluateRequest —— 规则求值出错时一律朝「更需要确�
   })
 })
 
+describe('RegExp URL 规则的确定性', () => {
+  it.each([
+    ['g', /\/api\/users\//g],
+    ['y', /^https:\/\/app\.example\.com\/api\/users/y]
+  ])('带 %s 标志的危险规则重复判定不会间歇性降级', (_flag, pattern) => {
+    const policy: InterceptionPolicy = {
+      danger: [{ id: 'danger-users', match: { url: pattern }}]
+    }
+
+    const reasons = [evaluate(policy), evaluate(policy), evaluate(policy)]
+      .map(result => result.reason)
+
+    expect(reasons).toEqual(['danger_list', 'danger_list', 'danger_list'])
+  })
+
+  it.each([
+    ['g', /\/api\/users\//g],
+    ['y', /^https:\/\/app\.example\.com\/api\/users/y]
+  ])('带 %s 标志的正则不会被一次判定修改 lastIndex', (_flag, pattern) => {
+    pattern.lastIndex = 7
+
+    expect(matchesRequest(request(), { url: pattern })).toBe(true)
+    expect(pattern.lastIndex).toBe(7)
+  })
+
+  it('RegExp 子类覆写 global getter 时仍按内部 g 状态稳定判定', () => {
+    class HiddenGlobalRegExp extends RegExp {
+      override get global(): boolean {
+        return false
+      }
+    }
+    const pattern = new HiddenGlobalRegExp('/api/users/', 'g')
+    const policy: InterceptionPolicy = {
+      danger: [{ id: 'danger-users', match: { url: pattern }}]
+    }
+
+    const reasons = [evaluate(policy), evaluate(policy), evaluate(policy)]
+      .map(result => result.reason)
+
+    expect(reasons).toEqual(['danger_list', 'danger_list', 'danger_list'])
+    expect(pattern.lastIndex).toBe(0)
+  })
+
+  it('保留 RegExp 子类自定义 exec 的匹配语义', () => {
+    class NeverMatchRegExp extends RegExp {
+      override exec(_value: string): RegExpExecArray | null {
+        return null
+      }
+    }
+    const pattern = new NeverMatchRegExp('/api/users/', 'g')
+
+    expect(matchesRequest(request(), { url: pattern })).toBe(false)
+    expect(pattern.lastIndex).toBe(0)
+  })
+})
+
 describe('matchesRequest', () => {
   it('方法匹配大小写不敏感', () => {
     expect(matchesRequest(request({ method: 'post' }), { method: 'POST' })).toBe(true)
