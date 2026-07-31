@@ -55,6 +55,14 @@ async function flushFormGate(): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, 0))
 }
 
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (condition()) return
+    await Promise.resolve()
+  }
+  throw new Error('Condition was not reached within 10 microtasks.')
+}
+
 beforeEach(() => {
   submitted = []
   document.body.replaceChildren()
@@ -130,5 +138,245 @@ describe('直接 form.submit()', () => {
     approve(true)
     await flushFormGate()
     expect(submitted).toEqual([form])
+  })
+})
+
+describe('表单请求投影', () => {
+  it('POST 重复字段按出现顺序保留为数组', async () => {
+    const { confirm } = setup()
+    const form = createForm(`
+      <input name="tag" value="a">
+      <input name="tag" value="b">
+    `)
+
+    dispatchSubmit(form)
+    await flushFormGate()
+
+    expect(confirm.mock.calls[0][0].request.body).toEqual({ tag: ['a', 'b'] })
+  })
+
+  it('POST 使用 submitter 的 formenctype', async () => {
+    const { confirm } = setup()
+    const form = createForm(`
+      <input name="name" value="张三">
+      <button formenctype="text/plain">保存</button>
+    `)
+    const button = form.querySelector('button') as HTMLButtonElement
+
+    dispatchSubmit(form, button)
+    await flushFormGate()
+
+    expect(confirm.mock.calls[0][0].request.headers).toEqual({
+      'content-type': 'text/plain'
+    })
+  })
+
+  it('文件只投影元数据，FormData 动态字段参与请求', async () => {
+    const { confirm } = setup()
+    const form = createForm('<input type="file" name="attachment">')
+    const NativeFormData = window.FormData
+    const file = new File(['abc'], 'proof.txt', {
+      type: 'text/plain',
+      lastModified: 123
+    })
+    vi.spyOn(window, 'FormData').mockImplementation(
+      function formDataWithDynamicField(
+        formArg?: HTMLFormElement,
+        submitter?: HTMLElement | null
+      ) {
+        const data = formArg
+          ? new NativeFormData(formArg, submitter ?? undefined)
+          : new NativeFormData()
+        data.set('attachment', file)
+        data.set('token', 'stable')
+        return data
+      } as unknown as (
+        form?: HTMLFormElement,
+        submitter?: HTMLElement | null
+      ) => FormData
+    )
+
+    dispatchSubmit(form)
+    await flushFormGate()
+
+    expect(confirm.mock.calls[0][0].request.body).toEqual({
+      attachment: {
+        kind: 'file',
+        name: 'proof.txt',
+        type: 'text/plain',
+        size: 3,
+        lastModified: 123
+      },
+      token: 'stable'
+    })
+  })
+})
+
+describe('批准快照失效', () => {
+  it('等待确认期间字段值变化会丢弃旧提交', async () => {
+    let approve!: (allowed: boolean) => void
+    setup({
+      confirm: vi.fn(() => new Promise<boolean>(resolve => { approve = resolve }))
+    })
+    const form = createForm()
+
+    dispatchSubmit(form)
+    await waitFor(() => typeof approve === 'function')
+    ;(form.elements.namedItem('name') as HTMLInputElement).value = '李四'
+    approve(true)
+    await flushFormGate()
+
+    expect(submitted).toHaveLength(0)
+  })
+
+  it('等待确认期间 target 变化会丢弃旧提交', async () => {
+    let approve!: (allowed: boolean) => void
+    setup({
+      confirm: vi.fn(() => new Promise<boolean>(resolve => { approve = resolve }))
+    })
+    const form = createForm()
+
+    dispatchSubmit(form)
+    await waitFor(() => typeof approve === 'function')
+    form.target = 'other-frame'
+    approve(true)
+    await flushFormGate()
+
+    expect(submitted).toHaveLength(0)
+  })
+
+  it('等待确认期间 acceptCharset 变化会丢弃旧提交', async () => {
+    let approve!: (allowed: boolean) => void
+    setup({
+      confirm: vi.fn(() => new Promise<boolean>(resolve => { approve = resolve }))
+    })
+    const form = createForm()
+
+    dispatchSubmit(form)
+    await waitFor(() => typeof approve === 'function')
+    form.acceptCharset = 'iso-8859-1'
+    approve(true)
+    await flushFormGate()
+
+    expect(submitted).toHaveLength(0)
+  })
+})
+
+describe('非网络表单边界', () => {
+  it('method=dialog 的 submit 事件不进入网络闸门', async () => {
+    const { confirm } = setup()
+    const form = createForm()
+    form.setAttribute('method', 'dialog')
+
+    const event = dispatchSubmit(form)
+    await flushFormGate()
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(submitted).toHaveLength(0)
+  })
+
+  it('method=dialog 的直接 submit 同步透传原实现', () => {
+    const { confirm } = setup()
+    const form = createForm()
+    form.setAttribute('method', 'dialog')
+
+    const result = form.submit()
+
+    expect(result).toBeUndefined()
+    expect(confirm).not.toHaveBeenCalled()
+    expect(submitted).toEqual([form])
+  })
+})
+
+describe('多实例表单治理', () => {
+  it('同一 submit 事件按 B → A → browser 执行', async () => {
+    const order: string[] = []
+    const instanceA = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: vi.fn(async () => { order.push('A'); return true }),
+      channels: ['form']
+    })
+    const instanceB = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: vi.fn(async () => { order.push('B'); return true }),
+      channels: ['form']
+    })
+    const uninstallA = instanceA.install()
+    const uninstallB = instanceB.install()
+    const form = createForm()
+
+    try {
+      dispatchSubmit(form)
+      await flushFormGate()
+
+      expect(order).toEqual(['B', 'A'])
+      expect(submitted).toEqual([form])
+    } finally {
+      uninstallB()
+      uninstallA()
+    }
+  })
+})
+
+describe('批准后的安全重放', () => {
+  it('重放保留 submitter 配置和字段，并在调用后恢复表单', async () => {
+    const replayed: Array<{
+      action: string
+      method: string
+      enctype: string
+      target: string
+      data: Record<string, string>
+    }> = []
+    const NativeFormData = window.FormData
+    HTMLFormElement.prototype.submit = function captureSubmit(this: HTMLFormElement) {
+      const data: Record<string, string> = {}
+      new NativeFormData(this).forEach((value, name) => {
+        data[name] = typeof value === 'string' ? value : value.name
+      })
+      replayed.push({
+        action: this.action,
+        method: this.method,
+        enctype: this.enctype,
+        target: this.target,
+        data
+      })
+      submitted.push(this)
+    }
+    const { confirm } = setup()
+    const form = createForm(`
+      <input name="name" value="张三">
+      <button name="intent" value="preview"
+        formaction="/api/preview" formmethod="get"
+        formenctype="text/plain" formtarget="preview-frame">预览</button>
+    `)
+    const button = form.querySelector('button') as HTMLButtonElement
+    const originalAttributes = {
+      action: form.getAttribute('action'),
+      method: form.getAttribute('method'),
+      enctype: form.getAttribute('enctype'),
+      target: form.getAttribute('target')
+    }
+
+    dispatchSubmit(form, button)
+    await flushFormGate()
+
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(replayed).toEqual([{
+      action: `${location.origin}/api/preview`,
+      method: 'get',
+      enctype: 'text/plain',
+      target: 'preview-frame',
+      data: { name: '张三', intent: 'preview' }
+    }])
+    expect({
+      action: form.getAttribute('action'),
+      method: form.getAttribute('method'),
+      enctype: form.getAttribute('enctype'),
+      target: form.getAttribute('target')
+    }).toEqual(originalAttributes)
+    expect(form.querySelectorAll('[data-toolairlock-replay]')).toHaveLength(0)
   })
 })
