@@ -80,6 +80,72 @@ export interface Interceptor {
 
 const DEFAULT_CHANNELS: readonly RequestChannel[] = ['fetch', 'xhr', 'beacon']
 
+const PATCH_SOURCE = '@toolairlock/interceptor' as const
+const PATCH_METADATA = Symbol.for(`${PATCH_SOURCE}.patch`)
+
+type PatchKind = 'fetch' | 'xhr-open' | 'xhr-send' | 'beacon'
+
+interface PatchLifecycle {
+  active: boolean
+}
+
+interface PatchMetadata {
+  source: typeof PATCH_SOURCE
+  kind: PatchKind
+  lifecycle: PatchLifecycle
+  previous: CallableFunction
+}
+
+/** 给本库 wrapper 写入跨 bundle 可识别的私有 patch 元数据。 */
+function markPatch<F extends CallableFunction>(
+  wrapper: F,
+  kind: PatchKind,
+  lifecycle: PatchLifecycle,
+  previous: F
+): F {
+  Object.defineProperty(wrapper, PATCH_METADATA, {
+    value: { source: PATCH_SOURCE, kind, lifecycle, previous } satisfies PatchMetadata
+  })
+  return wrapper
+}
+
+/** 只接受结构完整的本库元数据；异常或第三方值一律视为外部边界。 */
+function readPatchMetadata(value: unknown): PatchMetadata | undefined {
+  if (typeof value !== 'function') return undefined
+  const metadata = (value as CallableFunction & Record<PropertyKey, unknown>)[PATCH_METADATA]
+  if (!metadata || typeof metadata !== 'object') return undefined
+  const candidate = metadata as Partial<PatchMetadata>
+  if (
+    candidate.source !== PATCH_SOURCE ||
+    !isPatchKind(candidate.kind) ||
+    typeof candidate.previous !== 'function' ||
+    !candidate.lifecycle ||
+    typeof candidate.lifecycle.active !== 'boolean'
+  ) return undefined
+  return candidate as PatchMetadata
+}
+
+function isPatchKind(value: unknown): value is PatchKind {
+  return value === 'fetch' || value === 'xhr-open' ||
+    value === 'xhr-send' || value === 'beacon'
+}
+
+/** 恢复时跳过同通道的连续失活层，同时防止异常元数据形成循环。 */
+function skipInactivePatches<F extends CallableFunction>(
+  previous: F,
+  kind: PatchKind
+): F {
+  let current: CallableFunction = previous
+  const visited = new Set<CallableFunction>()
+  while (!visited.has(current)) {
+    visited.add(current)
+    const metadata = readPatchMetadata(current)
+    if (!metadata || metadata.kind !== kind || metadata.lifecycle.active) break
+    current = metadata.previous
+  }
+  return current as F
+}
+
 /**
  * 创建请求拦截器。
  *
@@ -237,18 +303,25 @@ function patchFetch(
 ): () => void {
   const original = view.fetch
   if (typeof original !== 'function') return () => undefined
+  const lifecycle: PatchLifecycle = { active: true }
 
-  view.fetch = async function patchedFetch(
+  const patchedFetch = async function patchedFetch(
     this: unknown,
     ...args: Parameters<typeof fetch>
   ) {
+    if (!lifecycle.active) return original.apply(this, args)
     const request = await toInterceptedRequest(args, nextId())
     if (!(await gate(request))) throw new RequestDeniedError(request)
     return original.apply(this, args)
   } as typeof fetch
+  markPatch(patchedFetch, 'fetch', lifecycle, original)
+  view.fetch = patchedFetch
 
   return () => {
-    view.fetch = original
+    lifecycle.active = false
+    if (view.fetch === patchedFetch) {
+      view.fetch = skipInactivePatches(original, 'fetch')
+    }
   }
 }
 
