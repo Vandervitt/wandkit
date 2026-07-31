@@ -1,4 +1,5 @@
 import { evaluateRequest } from './policy'
+import { patchForm } from './form'
 import {
   markPatch,
   skipInactivePatches,
@@ -151,6 +152,7 @@ export function createInterceptor(options: InterceptorOptions): Interceptor {
       if (channels.has('beacon')) {
         restores.push(patchBeacon(view, options, nextId))
       }
+      if (channels.has('form')) restores.push(patchForm(view, gate, nextId))
 
       return () => {
         if (cleaned) return
