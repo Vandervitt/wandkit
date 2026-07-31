@@ -882,6 +882,32 @@ describe('批准后的安全重放', () => {
       HTMLFormElement.prototype.submit = interceptedSubmit
     }
   })
+
+  it('确认等待期间后安装的外部 wrapper 仍参与最终重放', async () => {
+    let approve!: (allowed: boolean) => void
+    setup({
+      confirm: vi.fn(() => new Promise<boolean>(resolve => { approve = resolve }))
+    })
+    const interceptedSubmit = HTMLFormElement.prototype.submit
+    const form = createForm()
+
+    dispatchSubmit(form)
+    await waitFor(() => typeof approve === 'function')
+    const externalSubmit = vi.fn(function externalSubmit(this: HTMLFormElement) {
+      interceptedSubmit.call(this)
+    })
+    HTMLFormElement.prototype.submit = externalSubmit
+
+    try {
+      approve(true)
+      await flushFormGate()
+
+      expect(externalSubmit).toHaveBeenCalledTimes(1)
+      expect(submitted).toEqual([form])
+    } finally {
+      HTMLFormElement.prototype.submit = interceptedSubmit
+    }
+  })
 })
 
 describe('事务式安装', () => {

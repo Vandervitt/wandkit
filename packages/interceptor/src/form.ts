@@ -5,6 +5,7 @@ const FORM_REGISTRY_SOURCE = '@toolairlock/interceptor' as const
 const FORM_REGISTRY = Symbol.for(`${FORM_REGISTRY_SOURCE}.form-registry`)
 
 type FormGate = (request: InterceptedRequest) => Promise<boolean>
+type FormMethod = 'GET' | 'POST' | 'DIALOG'
 
 interface FormLayer {
   lifecycle: PatchLifecycle
@@ -51,7 +52,7 @@ interface FormSubmissionSnapshot {
   form: HTMLFormElement
   submitter: HTMLElement | null
   action: string
-  method: string
+  method: FormMethod
   enctype: string
   target: string
   acceptCharset: string
@@ -426,7 +427,7 @@ function resolveAction(
 function resolveMethod(
   form: HTMLFormElement,
   submitter: HTMLElement | null
-): string {
+): FormMethod {
   const override = submitter?.getAttribute('formmethod')
   const value = override !== null && override !== undefined ? override : form.method
   const normalized = value.toUpperCase()
