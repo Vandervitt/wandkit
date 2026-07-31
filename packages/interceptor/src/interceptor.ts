@@ -331,8 +331,6 @@ interface XhrCallState {
   url?: string
 }
 
-const xhrState = new WeakMap<XMLHttpRequest, XhrCallState>()
-
 /**
  * 接管 `XMLHttpRequest`。
  *
@@ -351,24 +349,31 @@ function patchXhr(
   if (!XHR?.prototype) return () => undefined
   const originalOpen = XHR.prototype.open
   const originalSend = XHR.prototype.send
-  let active = true
+  const lifecycle: PatchLifecycle = { active: true }
+  const callState = new WeakMap<XMLHttpRequest, XhrCallState>()
 
-  XHR.prototype.open = function patchedOpen(
+  const patchedOpen = function patchedOpen(
     this: XMLHttpRequest,
     method: string,
     url: string | URL,
     ...rest: unknown[]
   ) {
-    xhrState.set(this, { method: method.toUpperCase(), url: String(url) })
+    if (!lifecycle.active) {
+      return (originalOpen as (...args: unknown[]) => void)
+        .apply(this, [method, url, ...rest])
+    }
+    callState.set(this, { method: method.toUpperCase(), url: String(url) })
     return (originalOpen as (...args: unknown[]) => void)
       .apply(this, [method, url, ...rest])
   } as typeof XMLHttpRequest.prototype.open
 
-  XHR.prototype.send = function patchedSend(
+  const patchedSend = function patchedSend(
     this: XMLHttpRequest,
-    body?: Document | XMLHttpRequestBodyInit | null
+    ...args: Parameters<typeof XMLHttpRequest.prototype.send>
   ) {
-    const state = xhrState.get(this)
+    if (!lifecycle.active) return originalSend.apply(this, args)
+    const [body] = args
+    const state = callState.get(this)
     const request: InterceptedRequest = {
       id: nextId(),
       method: state?.method ?? 'GET',
@@ -382,16 +387,24 @@ function patchXhr(
       // 被拒时什么也不做：请求从未发出，宿主的 error/timeout 处理不会被触发。
       // 这与 fetch 侧抛 RequestDeniedError 不同——XHR 没有可以抛错的返回值。
       // 等待期间重新 open() 会替换状态对象；旧批准不能发送新的 XHR 配置。
-      if (allowed && active && xhrState.get(this) === state) {
-        originalSend.call(this, body ?? null)
+      if (allowed && lifecycle.active && callState.get(this) === state) {
+        originalSend.apply(this, args)
       }
     })
   } as typeof XMLHttpRequest.prototype.send
+  markPatch(patchedOpen, 'xhr-open', lifecycle, originalOpen)
+  markPatch(patchedSend, 'xhr-send', lifecycle, originalSend)
+  XHR.prototype.open = patchedOpen
+  XHR.prototype.send = patchedSend
 
   return () => {
-    active = false
-    XHR.prototype.open = originalOpen
-    XHR.prototype.send = originalSend
+    lifecycle.active = false
+    if (XHR.prototype.open === patchedOpen) {
+      XHR.prototype.open = skipInactivePatches(originalOpen, 'xhr-open')
+    }
+    if (XHR.prototype.send === patchedSend) {
+      XHR.prototype.send = skipInactivePatches(originalSend, 'xhr-send')
+    }
   }
 }
 
@@ -414,12 +427,14 @@ function patchBeacon(
   const navigatorRef = view.navigator
   const original = navigatorRef?.sendBeacon
   if (typeof original !== 'function') return () => undefined
+  const lifecycle: PatchLifecycle = { active: true }
 
-  navigatorRef.sendBeacon = function patchedBeacon(
+  const patchedBeacon = function patchedBeacon(
     this: Navigator,
-    url: string | URL,
-    data?: BodyInit | null
-  ): boolean {
+    ...args: Parameters<typeof original>
+  ): ReturnType<typeof original> {
+    if (!lifecycle.active) return original.apply(this, args)
+    const [url, data] = args
     const request: InterceptedRequest = {
       id: nextId(),
       // beacon 恒为 POST，规范如此。
@@ -433,14 +448,19 @@ function patchBeacon(
     const evaluated = evaluate(request, options)
     options.onVerdict?.(request, evaluated.verdict)
     if (evaluated.verdict.action === 'allow') {
-      return original.call(this, url, data)
+      return original.apply(this, args)
     }
     options.onUnholdableRequest?.(request)
     return false
-  }
+  } as typeof original
+  markPatch(patchedBeacon, 'beacon', lifecycle, original)
+  navigatorRef.sendBeacon = patchedBeacon
 
   return () => {
-    navigatorRef.sendBeacon = original
+    lifecycle.active = false
+    if (navigatorRef.sendBeacon === patchedBeacon) {
+      navigatorRef.sendBeacon = skipInactivePatches(original, 'beacon')
+    }
   }
 }
 
