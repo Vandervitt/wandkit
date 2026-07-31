@@ -43,6 +43,8 @@ const interceptor = createInterceptor({
   },
   attribution: createMaskAttribution({ isMaskArmed: () => mask.armed }),
   authorization: scope,
+  // form 不在默认通道中；需要治理原生表单时必须显式开启。
+  channels: ['fetch', 'xhr', 'beacon', 'form'],
   confirm: async ({ request, risk, disclosure }) => askUser(disclosure ?? request)
 })
 
@@ -102,13 +104,48 @@ await runAuthorized({ scope, token: confirmationId }, async () => {
 `end` 一定在 `finally` 里。`execute` 抛异常却没关窗口，后续所有 Agent 请求都会被
 无条件放行，**而且不会有任何报错提示闸门已经失效了**。
 
-## 三条通道
+## 四条通道
 
 | 通道 | 处理 | 代价 |
 |---|---|---|
 | `fetch` | 判定后再调原始实现 | 无 |
 | `XMLHttpRequest` | `open` 记录、`send` 内部延迟发送 | **破坏同步时序** |
 | `sendBeacon` | 无法挂起，需确认时拒发 | 改变宿主既有行为 |
+| `<form>` | 显式开启后暂停原生 submit；直接 `form.submit()` 内部延迟 | **破坏直接 submit 的同步发送时序** |
+
+`form` 刻意不加入默认通道。原生表单与宿主页面的事件、校验和导航逻辑耦合更深，接入方
+必须通过 `channels` 明确选择；只写 `channels: ['form']` 也可以单独治理表单。
+
+### 原生表单通道
+
+显式开启后覆盖三种入口：用户点击或 Enter 产生的原生 submit、
+`form.requestSubmit(submitter)`，以及不会触发 submit 事件的直接 `form.submit()`。
+
+- 宿主监听器已经 `preventDefault()` 的 SPA submit 不进入 form 闸门。它后续发出的
+  Fetch/XHR 请求仍由对应网络通道治理，不会重复确认。
+- 批准后调用当前 `HTMLFormElement.prototype.submit` 重放，不再次派发 submit 事件，
+  因此宿主 submit 监听器只执行一次；批准等待期间后安装的外部 submit wrapper 仍会参与。
+- `form.submit()` 仍同步返回 `undefined`，但真正提交会延迟到异步判定完成之后；拒绝、
+  确认异常或快照失效都表现为不提交。
+- 初始批准绑定 action、method、enctype、target、accept-charset、submitter 和有序字段快照。
+  等待期间任一配置、字符串字段或文件元数据变化，旧 continuation 都会被丢弃；页面需要
+  重新发起提交，不会拿旧批准发送新内容。
+- submitter 的 `formaction`、`formmethod`、`formenctype`、`formtarget` 和提交字段会进入
+  请求投影，并在最终重放期间临时恢复。image submitter 的 `x/y` 字段同样保留。
+- 多个 interceptor 实例按后安装到先安装的顺序治理，即 `B → A → browser`。已卸载且
+  尚未开始判定的层会被跳过；某层在自己的异步判定期间卸载时，旧提交会被丢弃；全部
+  捕获层都已失活时也不会自动放行。
+- `method=dialog` 不属于网络请求，保持浏览器原行为，不进入闸门。
+- iframe 中的表单属于另一个 Window realm，需要针对该 Window 单独传入 `view` 并安装。
+
+监听器安装在 Window 冒泡末端。常见框架在 form、应用 root 或 document 上接管 submit，
+会先执行并通过 `defaultPrevented` 被识别；但在 interceptor **之后**注册的 Window 级
+submit 监听器运行得更晚，本库无法预知它是否还会接管该事件。
+
+浏览器在构造 `new FormData(form, submitter)` 时会触发 `formdata`。初始快照、批准前复核、
+submitter 字段差异计算和最终原生提交都可能再次运行 FormData 算法，因此 `formdata`
+监听器可能执行多次。处理器必须幂等；计费、埋点或其他不可重复副作用不能直接放在
+`formdata` 监听器中。
 
 ### 已知限制
 
@@ -121,7 +158,11 @@ await runAuthorized({ scope, token: confirmationId }, async () => {
 **`sendBeacon` 无法挂起**：它设计上发生在 unload 期、同步返回 boolean，等不了异步
 确认。默认拒发并通过 `onUnholdableRequest` 让接入方知情。
 
-**未覆盖**：`<form>` 提交（需显式开启且与宿主表单逻辑耦合较深）、WebSocket / SSE。
+**原生表单的 MutationObserver 可见性**：重放会在同步 `try/finally` 内临时写入有效提交
+属性并添加 submitter hidden input，随后立即恢复；MutationObserver 仍可能观察到这些
+短暂变化。
+
+**未覆盖**：WebSocket / SSE。
 
 ## 接现成的确认卡片
 
