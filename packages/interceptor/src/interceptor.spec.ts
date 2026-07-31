@@ -173,6 +173,115 @@ describe('fetch —— 请求解析', () => {
       url: expect.stringContaining('/api/users/u_1')
     })
   })
+
+  it('Request 自带 body 参与危险规则判定，不能被宽泛放行规则绕过', async () => {
+    const confirm = vi.fn(async () => false)
+    setup({ confirm }, {
+      danger: [{
+        id: 'forced-action',
+        match: {
+          method: 'POST',
+          url: '/api/actions',
+          when: request => (request.body as { force?: boolean })?.force === true
+        }
+      }],
+      allow: [{ id: 'allow-api', match: { method: 'POST', url: '/api/**' } }]
+    })
+    const input = new Request('https://app.test/api/actions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ force: true })
+    })
+
+    await expect(fetch(input)).rejects.toBeInstanceOf(RequestDeniedError)
+
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      risk: 'destructive',
+      request: expect.objectContaining({ body: { force: true } })
+    }))
+    expect(sent).toHaveLength(0)
+  })
+
+  it('跨 realm Request 仍按真实方法、URL 与 headers 判定', async () => {
+    const input = new Request('https://app.test/api/users/u_1', {
+      method: 'DELETE',
+      headers: { 'x-operation-id': 'op-1' }
+    })
+    const confirm = vi.fn(async () => false)
+    vi.stubGlobal('Request', class OtherRealmRequest {})
+    vi.stubGlobal('Headers', class OtherRealmHeaders {})
+
+    try {
+      setup({ confirm })
+
+      await expect(fetch(input)).rejects.toBeInstanceOf(RequestDeniedError)
+
+      expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+        request: expect.objectContaining({
+          method: 'DELETE',
+          url: 'https://app.test/api/users/u_1',
+          headers: { 'x-operation-id': 'op-1' }
+        })
+      }))
+      expect(sent).toHaveLength(0)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('Request body 无法克隆读取时从严失败，不继续判定或发送', async () => {
+    const input = new Request('https://app.test/api/actions', {
+      method: 'POST',
+      body: JSON.stringify({ force: true })
+    })
+    const cloneError = new Error('body unavailable')
+    vi.spyOn(input, 'clone').mockImplementation(() => { throw cloneError })
+    const { confirm } = setup()
+
+    await expect(fetch(input)).rejects.toBe(cloneError)
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(sent).toHaveLength(0)
+  })
+
+  it('读取 Request body 供判定时不提前消费原请求', async () => {
+    let bodyUsedBeforeOriginalFetch: boolean | undefined
+    let bodyReceivedByOriginalFetch: string | undefined
+    window.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      if (input instanceof Request) {
+        bodyUsedBeforeOriginalFetch = input.bodyUsed
+        bodyReceivedByOriginalFetch = await input.text()
+      }
+      return new Response('{}', { status: 200 })
+    }) as typeof fetch
+    const bodiesSeenByPolicy: unknown[] = []
+    setup({}, {
+      danger: [{
+        id: 'inspect-body',
+        match: {
+          method: 'POST',
+          when: request => {
+            bodiesSeenByPolicy.push(request.body)
+            return false
+          }
+        }
+      }],
+      allow: [{ id: 'allow-api', match: { method: 'POST', url: '/api/**' } }]
+    })
+    const rawBody = JSON.stringify({ force: false })
+    const input = new Request('https://app.test/api/actions', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: rawBody
+    })
+
+    expect(input.bodyUsed).toBe(false)
+    await fetch(input)
+
+    expect(bodiesSeenByPolicy).toEqual([{ force: false }])
+    expect(bodyUsedBeforeOriginalFetch).toBe(false)
+    expect(bodyReceivedByOriginalFetch).toBe(rawBody)
+  })
 })
 
 describe('透传与生命周期', () => {
