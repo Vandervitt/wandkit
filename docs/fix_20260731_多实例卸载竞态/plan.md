@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `packages/interceptor/src/interceptor.spec.ts`
 
-- [ ] **Step 1: 写入非 LIFO 卸载失败测试**
+- [x] **Step 1: 写入非 LIFO 卸载失败测试**
 
 在生命周期相关的 `describe` 中加入以下用例。它先证明两层都生效，再先卸载旧实例 A，
 验证 B 仍能拒绝请求且 A 不再判定，最后验证浏览器函数引用完全恢复：
@@ -67,7 +67,7 @@ it('先卸载旧 Fetch 实例只移除该层，最后卸载恢复基线函数', 
 })
 ```
 
-- [ ] **Step 2: 写入 LIFO 卸载测试**
+- [x] **Step 2: 写入 LIFO 卸载测试**
 
 ```ts
 it('按 LIFO 卸载 Fetch 实例时保留前一激活层', async () => {
@@ -103,7 +103,7 @@ it('按 LIFO 卸载 Fetch 实例时保留前一激活层', async () => {
 })
 ```
 
-- [ ] **Step 3: 写入外部 wrapper 边界测试**
+- [x] **Step 3: 写入外部 wrapper 边界测试**
 
 ```ts
 it('卸载 Fetch 实例不覆盖后安装的外部 wrapper，旧引用只透明透传', async () => {
@@ -137,7 +137,7 @@ it('卸载 Fetch 实例不覆盖后安装的外部 wrapper，旧引用只透明�
 })
 ```
 
-- [ ] **Step 4: 运行测试确认旧实现失败**
+- [x] **Step 4: 运行测试确认旧实现失败**
 
 Run:
 
@@ -148,7 +148,7 @@ npx vitest run packages/interceptor/src/interceptor.spec.ts
 Expected: FAIL。非 LIFO 用例中 B 被 A 的卸载拆除；外部 wrapper 用例中外部函数被覆盖，
 且直接持有的旧 wrapper 仍会执行 A 的确认。
 
-- [ ] **Step 5: 提交红灯测试**
+- [x] **Step 5: 提交红灯测试**
 
 ```bash
 test "$(git branch --show-current)" = "fix_20260731_多实例卸载竞态"
@@ -162,7 +162,7 @@ git commit -m "fix: 复现 Fetch 多实例卸载竞态"
 **Files:**
 - Modify: `packages/interceptor/src/channels.spec.ts`
 
-- [ ] **Step 1: 写入 XHR 非 LIFO 卸载测试**
+- [x] **Step 1: 写入 XHR 非 LIFO 卸载测试**
 
 ```ts
 it('先卸载旧 XHR 实例时新实例仍生效，最后恢复 open 和 send', async () => {
@@ -211,7 +211,7 @@ it('先卸载旧 XHR 实例时新实例仍生效，最后恢复 open 和 send', 
 })
 ```
 
-- [ ] **Step 2: 写入 XHR 与 Beacon 的 LIFO 卸载测试**
+- [x] **Step 2: 写入 XHR 与 Beacon 的 LIFO 卸载测试**
 
 ```ts
 it('按 LIFO 卸载 XHR 实例时保留前一激活层', async () => {
@@ -287,7 +287,7 @@ it('按 LIFO 卸载 Beacon 实例时保留前一激活层', () => {
 })
 ```
 
-- [ ] **Step 3: 写入 XHR 外部只替换 open 与只替换 send 的测试**
+- [x] **Step 3: 写入 XHR 外部只替换 open 与只替换 send 的测试**
 
 ```ts
 it('XHR 卸载分别保留外部 open，并让其持有的旧 open 透明透传', async () => {
@@ -358,7 +358,7 @@ it('XHR 卸载分别保留外部 send，并让其持有的旧 send 透明透传'
 })
 ```
 
-- [ ] **Step 4: 写入 Beacon 非 LIFO 与外部 wrapper 测试**
+- [x] **Step 4: 写入 Beacon 非 LIFO 与外部 wrapper 测试**
 
 ```ts
 it('先卸载旧 Beacon 实例只移除该层，最后恢复基线函数', () => {
@@ -436,7 +436,7 @@ it('Beacon 卸载不覆盖外部 wrapper，旧引用只透明透传', () => {
 })
 ```
 
-- [ ] **Step 5: 运行测试确认旧实现失败**
+- [x] **Step 5: 运行测试确认旧实现失败**
 
 Run:
 
@@ -447,7 +447,7 @@ npx vitest run packages/interceptor/src/channels.spec.ts
 Expected: FAIL。旧实例卸载会拆掉新 XHR/Beacon 层并覆盖外部方法；直接持有的旧 wrapper
 也不会透明失活。
 
-- [ ] **Step 6: 提交红灯测试**
+- [x] **Step 6: 提交红灯测试**
 
 ```bash
 test "$(git branch --show-current)" = "fix_20260731_多实例卸载竞态"
@@ -462,7 +462,7 @@ git commit -m "fix: 复现请求通道多实例卸载竞态"
 - Modify: `packages/interceptor/src/interceptor.ts`
 - Test: `packages/interceptor/src/interceptor.spec.ts`
 
-- [ ] **Step 1: 增加内部 patch 元数据与解链辅助函数**
+- [x] **Step 1: 增加内部 patch 元数据与解链辅助函数**
 
 在 `DEFAULT_CHANNELS` 后加入以下私有实现；不从包入口导出：
 
@@ -531,7 +531,7 @@ function skipInactivePatches<F extends CallableFunction>(
 }
 ```
 
-- [ ] **Step 2: 改造 Fetch wrapper**
+- [x] **Step 2: 改造 Fetch wrapper**
 
 用独立生命周期标记 wrapper；失活时直接调用捕获的 `original`，卸载时只在当前属性仍是
 本层 wrapper 时恢复：
@@ -562,7 +562,7 @@ return () => {
 }
 ```
 
-- [ ] **Step 3: 运行 Fetch 测试确认转绿**
+- [x] **Step 3: 运行 Fetch 测试确认转绿**
 
 Run:
 
@@ -573,7 +573,7 @@ npm run typecheck --workspace @toolairlock/interceptor
 
 Expected: `interceptor.spec.ts` 全部 PASS，interceptor 类型检查退出码 0。
 
-- [ ] **Step 4: 提交 Fetch 实现**
+- [x] **Step 4: 提交 Fetch 实现**
 
 ```bash
 test "$(git branch --show-current)" = "fix_20260731_多实例卸载竞态"
@@ -588,7 +588,7 @@ git commit -m "fix: 支持 Fetch 多实例安全卸载"
 - Modify: `packages/interceptor/src/interceptor.ts`
 - Test: `packages/interceptor/src/channels.spec.ts`
 
-- [ ] **Step 1: 将 XHR 状态改为 patch 层私有并共享生命周期**
+- [x] **Step 1: 将 XHR 状态改为 patch 层私有并共享生命周期**
 
 删除模块级 `xhrState`，在 `patchXhr()` 中创建每层独立的 `callState` 和生命周期。`open`
 失活时原样透传，激活时只写入本层状态：
@@ -615,7 +615,7 @@ const patchedOpen = function patchedOpen(
 } as typeof XMLHttpRequest.prototype.open
 ```
 
-- [ ] **Step 2: 让 XHR send 失活时同步透传，激活时保持 continuation 校验**
+- [x] **Step 2: 让 XHR send 失活时同步透传，激活时保持 continuation 校验**
 
 ```ts
 const patchedSend = function patchedSend(
@@ -657,7 +657,7 @@ return () => {
 }
 ```
 
-- [ ] **Step 3: 改造 Beacon wrapper**
+- [x] **Step 3: 改造 Beacon wrapper**
 
 ```ts
 const original = navigatorRef?.sendBeacon
@@ -697,7 +697,7 @@ return () => {
 }
 ```
 
-- [ ] **Step 4: 运行通道测试与包级检查确认转绿**
+- [x] **Step 4: 运行通道测试与包级检查确认转绿**
 
 Run:
 
@@ -710,7 +710,7 @@ git diff --check
 
 Expected: 两个测试文件全部 PASS，类型检查和 diff 检查退出码 0。
 
-- [ ] **Step 5: 提交通道实现**
+- [x] **Step 5: 提交通道实现**
 
 ```bash
 test "$(git branch --show-current)" = "fix_20260731_多实例卸载竞态"
@@ -726,7 +726,7 @@ git commit -m "fix: 修复请求通道多实例卸载竞态"
 - Create: `docs/fix_20260731_多实例卸载竞态/review.md`
 - Modify: `docs/fix_20260731_多实例卸载竞态/plan.md`
 
-- [ ] **Step 1: 运行完整验证门槛**
+- [x] **Step 1: 运行完整验证门槛**
 
 Run:
 
@@ -737,7 +737,7 @@ git diff --check
 
 Expected: 全部 Vitest 测试、workspace 类型检查和构建通过；`git diff --check` 无输出。
 
-- [ ] **Step 2: 执行独立复审**
+- [x] **Step 2: 执行独立复审**
 
 使用 `superpowers:requesting-code-review` 审查基线 `3b7e145` 到当前 HEAD 的完整 diff，重点
 核对：
@@ -752,13 +752,13 @@ Expected: 全部 Vitest 测试、workspace 类型检查和构建通过；`git di
 Expected: Critical/Important 问题为 0；若发现问题，修复并重新运行受影响测试和
 `npm run verify`。
 
-- [ ] **Step 3: 写入真实结果**
+- [x] **Step 3: 写入真实结果**
 
 `test-results.md` 必须记录：基线测试、各红灯用例的失败原因、绿灯命令、完整测试数量、
 类型检查和构建退出码。`review.md` 必须记录 scope、数据流、外部边界、复审结论和仍存在
 的非目标限制。将本计划已完成步骤的复选框更新为 `[x]`。
 
-- [ ] **Step 4: 提交验证与复审记录**
+- [x] **Step 4: 提交验证与复审记录**
 
 ```bash
 test "$(git branch --show-current)" = "fix_20260731_多实例卸载竞态"
