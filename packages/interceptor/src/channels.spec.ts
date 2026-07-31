@@ -10,7 +10,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createInterceptor } from './interceptor'
 import { createStaticAttribution } from './attribution'
-import type { Interceptor, InterceptorOptions } from './interceptor'
+import type {
+  ConfirmRequestHandler,
+  Interceptor,
+  InterceptorOptions
+} from './interceptor'
 import type { InterceptionPolicy } from './types'
 
 let interceptor: Interceptor | undefined
@@ -95,6 +99,105 @@ describe('XMLHttpRequest', () => {
 
     expect(confirm).toHaveBeenCalledTimes(1)
     expect(sent).toEqual([{ channel: 'xhr', method: 'DELETE', url: '/api/users/u_1' }])
+  })
+
+  it('等待确认期间重新 open 会使旧发送失效', async () => {
+    let approveOld!: (allowed: boolean) => void
+    const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+      async () => true
+    )
+    confirm.mockImplementationOnce(() => new Promise<boolean>(resolve => {
+      approveOld = resolve
+    }))
+    setup({ confirm })
+    const request = new XMLHttpRequest()
+    request.open('DELETE', '/api/users/u_1')
+    request.send('old-body')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(confirm.mock.calls[0][0].request).toMatchObject({
+      method: 'DELETE',
+      url: '/api/users/u_1',
+      body: 'old-body'
+    })
+
+    request.open('POST', '/api/transfers')
+    approveOld(true)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(sent).toHaveLength(0)
+
+    request.send('new-body')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(confirm.mock.calls[1][0].request).toMatchObject({
+      method: 'POST',
+      url: '/api/transfers',
+      body: 'new-body'
+    })
+    expect(sent).toEqual([{ channel: 'xhr', method: 'POST', url: '/api/transfers' }])
+  })
+
+  it('即使参数相同，重新 open 也会使旧发送失效', async () => {
+    let approveOld!: (allowed: boolean) => void
+    const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+      () => new Promise<boolean>(resolve => { approveOld = resolve })
+    )
+    setup({ confirm })
+    const request = new XMLHttpRequest()
+    request.open('POST', '/api/actions')
+    request.send('old-body')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    request.open('POST', '/api/actions')
+    approveOld(true)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(sent).toHaveLength(0)
+  })
+
+  it('等待确认期间卸载会使旧发送失效', async () => {
+    let approveOld!: (allowed: boolean) => void
+    const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+      () => new Promise<boolean>(resolve => { approveOld = resolve })
+    )
+    setup({ confirm })
+    const request = new XMLHttpRequest()
+    request.open('DELETE', '/api/users/u_1')
+    request.send('old-body')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    uninstall?.()
+    uninstall = undefined
+    request.open('POST', '/api/transfers')
+    approveOld(true)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(sent).toHaveLength(0)
+  })
+
+  it('旧卸载函数在重装后重复调用不会拆掉新安装', async () => {
+    let approveOld!: (allowed: boolean) => void
+    const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+      () => new Promise<boolean>(resolve => { approveOld = resolve })
+    )
+    setup({ confirm })
+    const firstUninstall = uninstall as () => void
+    firstUninstall()
+    uninstall = interceptor?.install()
+
+    const request = new XMLHttpRequest()
+    request.open('DELETE', '/api/users/u_1')
+    request.send('old-body')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    firstUninstall()
+    request.open('POST', '/api/transfers')
+    approveOld(true)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(interceptor?.installed).toBe(true)
+    expect(sent).toHaveLength(0)
   })
 
   it('拒绝时请求根本不发出', async () => {

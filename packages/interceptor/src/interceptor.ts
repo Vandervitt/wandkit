@@ -138,6 +138,7 @@ export function createInterceptor(options: InterceptorOptions): Interceptor {
       // 幂等：叠两层 patch 会让同一个请求被判定两次。
       if (installed || !view) return () => undefined
       installed = true
+      let cleaned = false
       const restores: Array<() => void> = []
 
       if (channels.has('fetch')) restores.push(patchFetch(view, gate, nextId))
@@ -147,6 +148,8 @@ export function createInterceptor(options: InterceptorOptions): Interceptor {
       }
 
       return () => {
+        if (cleaned) return
+        cleaned = true
         if (!installed) return
         installed = false
         restores.forEach(restore => restore())
@@ -275,6 +278,7 @@ function patchXhr(
   if (!XHR?.prototype) return () => undefined
   const originalOpen = XHR.prototype.open
   const originalSend = XHR.prototype.send
+  let active = true
 
   XHR.prototype.open = function patchedOpen(
     this: XMLHttpRequest,
@@ -291,11 +295,11 @@ function patchXhr(
     this: XMLHttpRequest,
     body?: Document | XMLHttpRequestBodyInit | null
   ) {
-    const state = xhrState.get(this) ?? {}
+    const state = xhrState.get(this)
     const request: InterceptedRequest = {
       id: nextId(),
-      method: state.method ?? 'GET',
-      url: state.url ?? '',
+      method: state?.method ?? 'GET',
+      url: state?.url ?? '',
       headers: {},
       body: parseBody(body as BodyInit | null | undefined),
       channel: 'xhr',
@@ -304,11 +308,15 @@ function patchXhr(
     void gate(request).then(allowed => {
       // 被拒时什么也不做：请求从未发出，宿主的 error/timeout 处理不会被触发。
       // 这与 fetch 侧抛 RequestDeniedError 不同——XHR 没有可以抛错的返回值。
-      if (allowed) originalSend.call(this, body ?? null)
+      // 等待期间重新 open() 会替换状态对象；旧批准不能发送新的 XHR 配置。
+      if (allowed && active && xhrState.get(this) === state) {
+        originalSend.call(this, body ?? null)
+      }
     })
   } as typeof XMLHttpRequest.prototype.send
 
   return () => {
+    active = false
     XHR.prototype.open = originalOpen
     XHR.prototype.send = originalSend
   }
