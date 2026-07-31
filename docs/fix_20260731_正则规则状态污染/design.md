@@ -32,31 +32,37 @@
 - 同一条 `g` 或 `y` URL 正则重复判断相同请求时必须得到一致结果。
 - 策略判定不得修改调用方正则的 `lastIndex`。
 - 危险规则不得因共享正则状态从 `destructive` 间歇性降级。
+- 保留 `RegExp` 子类覆写的 `test()` / `exec()` 匹配行为，不依赖可覆写的 flags getter。
 - 保持普通正则、字符串 glob、method、`when()` 与判定顺序不变。
 - 不改变公开类型或规则配置格式。
 
 ## 非目标
 
-- 不改变 JavaScript 正则本身的匹配语义或 flags。
+- 不改变正则的 pattern、flags 或子类自定义匹配行为；策略判定固定从游标 0 开始。
 - 不新增正则缓存、规则预编译或配置校验框架。
 - 不处理跨 realm 的 `RegExp` 识别问题。
 - 不夹带 XHR、fetch、beacon 或确认 UI 修改。
 
 ## 推荐方案
 
-仅对具有状态型标志的正则创建一次性副本，再在副本上执行 `.test()`：
+对原正则对象执行 `.test()`，但把一次策略判定使用的匹配游标隔离在调用内部：进入前
+保存调用方 `lastIndex` 并从 0 开始，离开时在 `finally` 中恢复原值。
 
 ```ts
 function testRegExp(pattern: RegExp, value: string): boolean {
-  const candidate = pattern.global || pattern.sticky
-    ? new RegExp(pattern.source, pattern.flags)
-    : pattern
-  return candidate.test(value)
+  const lastIndex = pattern.lastIndex
+  try {
+    if (lastIndex !== 0) pattern.lastIndex = 0
+    return pattern.test(value)
+  } finally {
+    if (pattern.lastIndex !== lastIndex) pattern.lastIndex = lastIndex
+  }
 }
 ```
 
-普通正则继续复用原实例，不增加分配；`g`/`y` 副本从 `lastIndex = 0` 开始并承接原
-`source` 与全部 flags，既保持匹配语义，也不会读写调用方对象的状态。
+该方案不读取可能被子类覆写的 `global`、`sticky`、`source` 或 `flags` getter，也不把
+子类克隆成普通 RegExp，因此既能处理内部带 `g`/`y` 的实例，又保留其自定义 `exec()`
+语义。`finally` 保证正常返回或抛错时都恢复调用方游标。
 
 ## 数据流
 
@@ -67,35 +73,35 @@ RequestMatcher.url
        │
        └─ RegExp
             │
-            ├─ 无 g/y ──→ 原实例 test(fullUrl)
-            │
-            └─ 有 g/y ──→ clone(source, flags) ──→ test(fullUrl)
-                              │
-                              └─ 原实例 lastIndex 保持不变
+            ├─ 保存原 lastIndex
+            ├─ 本次判定游标设为 0
+            ├─ 原实例 test(fullUrl)（保留子类 exec）
+            └─ finally 恢复原 lastIndex
 ```
 
 ## 涉及文件
 
 | 文件 | 操作 | 说明 |
 |---|---|---|
-| `packages/interceptor/src/policy.spec.ts` | 修改 | 增加 `g`/`y` 重复判定与状态不变回归测试 |
-| `packages/interceptor/src/policy.ts` | 修改 | 状态型正则使用一次性副本进行匹配 |
+| `packages/interceptor/src/policy.spec.ts` | 修改 | 增加 `g`/`y`、非零游标和 RegExp 子类回归测试 |
+| `packages/interceptor/src/policy.ts` | 修改 | 在单次判定内隔离并恢复正则匹配游标 |
 | `docs/fix_20260731_正则规则状态污染/plan.md` | 新增 | TDD 与交付步骤 |
 | `docs/fix_20260731_正则规则状态污染/test-results.md` | 新增 | 记录基线、红绿和完整验证结果 |
 | `docs/fix_20260731_正则规则状态污染/review.md` | 新增 | 记录 scope、契约与独立复审结论 |
 
 ## 风险与回退
 
-- 仅 `g`/`y` 正则每次判定多创建一个小对象；规则数量和请求判定频率下成本可控，且避免
-  引入需要生命周期管理的缓存。
-- 状态型正则不再承接调用方预设的 `lastIndex`。策略规则本应描述 URL 是否匹配，而不是
-  依赖上一次请求留下的游标；这是恢复确定性契约，不是兼容性破坏。
+- 不创建新 RegExp 或缓存；每次正则判定只增加常数次游标读写与 `try/finally`。
+- 策略匹配固定从游标 0 开始，但调用结束后恢复调用方预设的非零 `lastIndex`。规则本应
+  描述 URL 是否匹配，而不是依赖上一次请求留下的游标。
 - 回退只需撤销本 PR，不涉及数据、配置和公开 API 迁移。
 
 ## 验收标准
 
 1. `g` URL 正则连续三次判断相同危险请求，三次均返回 `destructive`。
 2. `y` URL 正则连续三次判断相同危险请求，三次均返回 `destructive`。
-3. 单次判断后调用方正则的 `lastIndex` 不变。
-4. 现有 30 个 policy 测试和其他 interceptor 测试不回归。
-5. `npm run verify` 全部通过。
+3. 单次判断从游标 0 开始，并在结束后恢复调用方原有的非零 `lastIndex`。
+4. 覆写 `global` getter 的 RegExp 子类仍不会状态污染。
+5. RegExp 子类自定义 `exec()` 语义保持不变。
+6. 现有 30 个 policy 测试和其他 interceptor 测试不回归。
+7. `npm run verify` 全部通过。

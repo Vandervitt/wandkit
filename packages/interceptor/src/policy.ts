@@ -152,11 +152,14 @@ function matchesUrl(request: InterceptedRequest, matcher: RequestMatcher): boole
 }
 
 function testRegExp(pattern: RegExp, value: string): boolean {
-  // g/y 的 test() 会读写 lastIndex；规则判定必须独立于上一次请求留下的游标。
-  const candidate = pattern.global || pattern.sticky
-    ? new RegExp(pattern.source, pattern.flags)
-    : pattern
-  return candidate.test(value)
+  // RegExp 子类可以覆写 flags getter 或 exec()；直接使用原对象，只隔离匹配游标。
+  const lastIndex = pattern.lastIndex
+  try {
+    if (lastIndex !== 0) pattern.lastIndex = 0
+    return pattern.test(value)
+  } finally {
+    if (pattern.lastIndex !== lastIndex) pattern.lastIndex = lastIndex
+  }
 }
 
 function pathnameOf(url: string): string {

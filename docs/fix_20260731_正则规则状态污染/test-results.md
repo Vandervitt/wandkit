@@ -21,8 +21,8 @@ g: true(lastIndex=34) → false(lastIndex=0) → true(lastIndex=34)
 y: true(lastIndex=33) → false(lastIndex=0)
 ```
 
-以相同 `source` 与 `flags` 创建一次性副本后，`g`/`y` 均连续三次返回 `true`，原规则
-`lastIndex` 保持 0。
+初步验证表明，隔离状态型正则实例可以恢复原生 `g`/`y` 的确定性；独立复审进一步发现
+RegExp 子类会使克隆方案丢失既有语义，因此最终改为保存并恢复原对象的匹配游标。
 
 ## TDD 红灯
 
@@ -51,6 +51,33 @@ npx vitest run packages/interceptor/src/policy.spec.ts
 
 结果：退出码 0，1 个测试文件、34 个测试全部通过。
 
+## 独立复审补充红绿循环
+
+第一轮独立审查发现中间克隆方案仍有两个边界：RegExp 子类可覆写 `global` getter 绕过
+克隆，克隆本身也会丢失子类自定义 `exec()`。增加两个回归测试后执行：
+
+```bash
+npx vitest run packages/interceptor/src/policy.spec.ts
+```
+
+红灯结果：退出码 1，36 个测试中新增 2 个失败：
+
+1. 覆写 `global` getter 后重复判定再次得到 `danger_list, default_deny, danger_list`。
+2. `exec()` 恒返回 `null` 的子类被克隆成普通 RegExp，错误地从不匹配变为匹配。
+
+同时把 `lastIndex` 测试的初始游标改为 7，并临时恢复基线直测实现单独运行该用例：
+
+```bash
+npx vitest run packages/interceptor/src/policy.spec.ts \
+  -t '不会被一次判定修改 lastIndex'
+```
+
+红灯结果：退出码 1，2 个目标测试均失败；`g` 游标变为 34，`y` 从游标 7 开始导致
+本应命中的 URL 返回 false。
+
+最终改为从游标 0 调用原对象的 `test()`，并在 `finally` 中恢复原游标后重跑完整目标
+文件：退出码 0，36 个测试全部通过。
+
 ## Interceptor 包级验证
 
 执行：
@@ -62,7 +89,7 @@ npm run typecheck --workspace @toolairlock/interceptor
 
 结果：退出码均为 0。
 
-- Vitest：7 个测试文件、119 个测试全部通过。
+- Vitest：7 个测试文件、121 个测试全部通过。
 - TypeScript：`@toolairlock/interceptor` 的 `tsc --noEmit` 通过。
 
 ## 完整验证
@@ -75,7 +102,7 @@ npm run verify
 
 结果：退出码 0。
 
-- Vitest：46 个测试文件、649 个测试全部通过。
+- Vitest：46 个测试文件、651 个测试全部通过。
 - TypeScript：5 个 workspace 的 `tsc --noEmit` 全部通过。
 - Build：5 个 workspace 的 tsup ESM、CJS、DTS 构建全部通过。
 - 测试输出包含 jsdom 对 `HTMLFormElement.requestSubmit()` 未实现的既有 stderr 提示，
