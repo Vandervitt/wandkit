@@ -774,7 +774,7 @@ git commit -m "fix: 记录多实例卸载验证结论"
 **Files:**
 - No file changes
 
-- [ ] **Step 1: 推送前核对分支与工作区**
+- [x] **Step 1: 推送前核对分支与工作区**
 
 Run:
 
@@ -787,7 +787,7 @@ git branch -vv
 Expected: 当前分支为 `fix_20260731_多实例卸载竞态`，工作区干净，分支未错误跟踪
 `origin/main`。
 
-- [ ] **Step 2: 首次同名推送**
+- [x] **Step 2: 首次同名推送**
 
 ```bash
 git push -u origin fix_20260731_多实例卸载竞态:fix_20260731_多实例卸载竞态
@@ -795,7 +795,7 @@ git push -u origin fix_20260731_多实例卸载竞态:fix_20260731_多实例卸�
 
 Expected: 推送成功，设置同名远端跟踪分支。
 
-- [ ] **Step 3: 创建 PR**
+- [x] **Step 3: 创建 PR**
 
 以 `main` 为基线创建独立 PR。标题使用中文 Conventional Commit 风格，正文包含问题、
 根因、方案、红绿测试证据、完整验证和风险边界；不自动合入。

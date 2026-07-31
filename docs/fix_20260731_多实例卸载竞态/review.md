@@ -73,3 +73,10 @@
 - Minor：0
 
 实现与已确认设计一致，可以进入提交、推送和 PR 阶段。
+
+## 交付
+
+- 远端分支：`origin/fix_20260731_多实例卸载竞态`
+- Pull Request：https://github.com/Vandervitt/wandkit/pull/4
+- PR 基线：`main`
+- 状态：已创建，未自动合入
