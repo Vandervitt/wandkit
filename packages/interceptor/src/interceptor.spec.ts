@@ -396,6 +396,127 @@ describe('透传与生命周期', () => {
 
     expect(interceptor?.installed).toBe(false)
   })
+
+  it('先卸载旧 Fetch 实例只移除该层，最后卸载恢复基线函数', async () => {
+    const baselineFetch = window.fetch
+    const order: string[] = []
+    const confirmA = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+      async () => { order.push('A'); return true }
+    )
+    const confirmB = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+      async () => { order.push('B'); return true }
+    )
+    const instanceA = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: confirmA,
+      channels: ['fetch']
+    })
+    const instanceB = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: confirmB,
+      channels: ['fetch']
+    })
+    const uninstallA = instanceA.install()
+    const uninstallB = instanceB.install()
+
+    try {
+      await fetch('/api/users/u_1', { method: 'DELETE' })
+      expect(order).toEqual(['B', 'A'])
+
+      confirmA.mockClear()
+      confirmB.mockClear()
+      order.length = 0
+      sent = []
+      confirmB.mockResolvedValueOnce(false)
+      uninstallA()
+
+      await expect(fetch('/api/users/u_2', { method: 'DELETE' }))
+        .rejects.toBeInstanceOf(RequestDeniedError)
+      expect(order).toEqual([])
+      expect(confirmB).toHaveBeenCalledTimes(1)
+      expect(confirmA).not.toHaveBeenCalled()
+      expect(sent).toHaveLength(0)
+
+      uninstallB()
+      expect(window.fetch).toBe(baselineFetch)
+    } finally {
+      uninstallB()
+      uninstallA()
+      window.fetch = baselineFetch
+    }
+  })
+
+  it('按 LIFO 卸载 Fetch 实例时保留前一激活层', async () => {
+    const baselineFetch = window.fetch
+    const confirmA = vi.fn(async () => true)
+    const confirmB = vi.fn(async () => true)
+    const instanceA = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: confirmA,
+      channels: ['fetch']
+    })
+    const instanceB = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: confirmB,
+      channels: ['fetch']
+    })
+    const uninstallA = instanceA.install()
+    const wrapperA = window.fetch
+    const uninstallB = instanceB.install()
+
+    try {
+      uninstallB()
+      expect(window.fetch).toBe(wrapperA)
+
+      await fetch('/api/users/u_1', { method: 'DELETE' })
+      expect(confirmA).toHaveBeenCalledTimes(1)
+      expect(confirmB).not.toHaveBeenCalled()
+
+      uninstallA()
+      expect(window.fetch).toBe(baselineFetch)
+    } finally {
+      uninstallB()
+      uninstallA()
+      window.fetch = baselineFetch
+    }
+  })
+
+  it('卸载 Fetch 实例不覆盖后安装的外部 wrapper，旧引用只透明透传', async () => {
+    const baselineFetch = window.fetch
+    const confirmA = vi.fn(async () => true)
+    const instanceA = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: confirmA,
+      channels: ['fetch']
+    })
+    const uninstallA = instanceA.install()
+    const interceptedFetch = window.fetch
+    const externalFetch = vi.fn(function (
+      this: unknown,
+      ...args: Parameters<typeof fetch>
+    ) {
+      return interceptedFetch.apply(this, args)
+    }) as typeof fetch
+    window.fetch = externalFetch
+
+    try {
+      uninstallA()
+
+      expect(window.fetch).toBe(externalFetch)
+      await fetch('/api/users/u_1', { method: 'DELETE' })
+      expect(externalFetch).toHaveBeenCalledTimes(1)
+      expect(confirmA).not.toHaveBeenCalled()
+      expect(sent).toHaveLength(1)
+    } finally {
+      window.fetch = baselineFetch
+      uninstallA()
+    }
+  })
 })
 
 describe('闸门自身出错时从严', () => {
