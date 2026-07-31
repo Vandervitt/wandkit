@@ -56,4 +56,7 @@
 
 - 第一轮：Critical 无；Important 指出 RegExp 子类可绕过克隆分支，且克隆会丢失自定义
   `exec()` 语义。已按 TDD 增加回归测试，并改为保存/恢复原对象游标。
-- 第二轮：待复审；Critical 与 Important 必须清零后才能推送。
+- 第二轮：Critical 无，Important 无，`Ready to merge: Yes`。确认覆写 flags getter 不再
+  绕过隔离，自定义 `test()` / `exec()` 语义得到保留，非零游标可正确恢复。
+- Minor：尚未用自定义 `exec()` 主动修改游标后抛错来直接覆盖 `finally` 异常路径；审查
+  确认当前实现正确，该项为非阻塞测试增强，不在本 PR 扩大 scope。
