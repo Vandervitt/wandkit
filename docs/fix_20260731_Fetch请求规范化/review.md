@@ -17,8 +17,8 @@
 | Request 自带 JSON body 参与判定 | 危险规则与宽泛 allow 同时存在的拒绝测试 | 通过 |
 | 跨 realm Request 保留 method、URL、headers | 替换当前 realm 的 Request/Headers 构造器后测试 | 通过 |
 | 原 Request 不被提前消费 | 原始 fetch 收到时 `bodyUsed === false` 且能读取完整文本 | 通过 |
-| clone/read 失败从严 | clone 抛错时 confirm 与原始 fetch 均未调用 | 通过 |
-| `init` 覆盖优先级 | method、headers 保持 `init ?? Request`；body 显式存在时使用 init | 通过 |
+| clone/read 失败从严 | clone 同步抛错、text 异步拒绝时 confirm 与原始 fetch 均未调用 | 通过 |
+| `init` 覆盖优先级 | method、headers 保持 `init ?? Request`；body 非 nullish 时使用 init | 通过 |
 | 原 fetch 形态不变 | `original.apply(this, args)` 未修改 | 通过 |
 | 无公开 API 变化 | 新增函数均为模块内部函数 | 通过 |
 
@@ -28,8 +28,9 @@
   `instanceof` 假阴性。
 - Headers 在排除数组后通过标准 `forEach` 读取，跨 realm Headers 不依赖当前构造器；
   tuple 数组和普通 record 保留原分支。
-- 只在 Request 确实有 body 且 `init` 未提供 body 时读取 `request.clone().text()`，原始
-  Request 继续原样传给原 fetch。
+- 只在 Request 确实有 body 且 `init` 未提供非 nullish body 时读取
+  `request.clone().text()`；`init.body` 为 `undefined` 或 `null` 时按 Fetch 语义沿用输入
+  Request body，原始 Request 继续原样传给原 fetch。
 - clone 或文本读取抛错会让 patched fetch 直接 reject，判定和网络发送均不会发生，符合
   治理层从严策略。
 - 性能成本是一份 Request body 的 clone 与文本解码，仅发生在 interceptor 接管且 Request
@@ -39,3 +40,11 @@
 
 实现与设计一致，未发现需要夹带到本 PR 的额外修改。后续 XHR 确认竞态和正则状态污染
 继续按独立 PR 处理。
+
+## 独立代码审查处理
+
+- Critical：审查指出 `init.body` 为 `undefined` / `null` 时仍应沿用 Request body。已用
+  真实 Request 行为确认，并通过两组先失败后通过的回归测试修正。
+- Important：无。
+- Minor：已补充 `clone().text()` 异步拒绝测试；已强化原 fetch 透传测试，严格比较
+  input、init 引用、参数数量与 `this`。

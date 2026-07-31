@@ -19,7 +19,7 @@
 ## 目标
 
 - 对字符串、URL、同 realm Request、跨 realm Request 使用一致的解析语义。
-- `RequestInit` 显式提供的 method、headers、body 继续优先于 Request 自带值。
+- `RequestInit` 提供的 method、headers 继续优先；非 nullish body 优先于 Request 自带值。
 - 读取 Request body 时只消费 `clone()`，不得让真正发送的原 Request 变成 `bodyUsed`。
 - 无法复制或读取请求体时从严失败，不得在信息不完整时继续判定并放行。
 - 不改变原始 `fetch` 的参数、`this` 绑定、返回值和实际发送对象。
@@ -52,7 +52,7 @@ fetch(input, init)
         ├─ method  = init.method  ?? request.method ?? GET
         ├─ headers = init.headers ?? request.headers
         └─ body
-             ├─ init 显式声明 body → 解析 init.body
+             ├─ init.body 非 nullish → 解析 init.body
              ├─ Request 没有 body  → undefined
              └─ Request 有 body    → clone().text() → JSON/文本解析
 ```

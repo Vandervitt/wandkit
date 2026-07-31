@@ -202,6 +202,36 @@ describe('fetch —— 请求解析', () => {
     expect(sent).toHaveLength(0)
   })
 
+  it.each([
+    ['undefined', undefined],
+    ['null', null]
+  ] as const)('init.body 为 %s 时仍沿用 Request 自带 body', async (_label, body) => {
+    const confirm = vi.fn(async () => false)
+    setup({ confirm }, {
+      danger: [{
+        id: 'forced-action',
+        match: {
+          method: 'POST',
+          url: '/api/actions',
+          when: request => (request.body as { force?: boolean })?.force === true
+        }
+      }],
+      allow: [{ id: 'allow-api', match: { method: 'POST', url: '/api/**' } }]
+    })
+    const input = new Request('https://app.test/api/actions', {
+      method: 'POST',
+      body: JSON.stringify({ force: true })
+    })
+
+    await expect(fetch(input, { body })).rejects.toBeInstanceOf(RequestDeniedError)
+
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      risk: 'destructive',
+      request: expect.objectContaining({ body: { force: true } })
+    }))
+    expect(sent).toHaveLength(0)
+  })
+
   it('跨 realm Request 仍按真实方法、URL 与 headers 判定', async () => {
     const input = new Request('https://app.test/api/users/u_1', {
       method: 'DELETE',
@@ -244,10 +274,39 @@ describe('fetch —— 请求解析', () => {
     expect(sent).toHaveLength(0)
   })
 
-  it('读取 Request body 供判定时不提前消费原请求', async () => {
+  it('Request body 文本读取失败时从严失败，不继续判定或发送', async () => {
+    const input = new Request('https://app.test/api/actions', {
+      method: 'POST',
+      body: JSON.stringify({ force: true })
+    })
+    const readError = new Error('body read failed')
+    const clone = input.clone()
+    vi.spyOn(clone, 'text').mockRejectedValue(readError)
+    vi.spyOn(input, 'clone').mockReturnValue(clone)
+    const { confirm } = setup()
+
+    await expect(fetch(input)).rejects.toBe(readError)
+
+    expect(confirm).not.toHaveBeenCalled()
+    expect(sent).toHaveLength(0)
+  })
+
+  it('读取 Request body 供判定时不消费或改写原 fetch 调用', async () => {
     let bodyUsedBeforeOriginalFetch: boolean | undefined
     let bodyReceivedByOriginalFetch: string | undefined
-    window.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    let inputReceivedByOriginalFetch: RequestInfo | URL | undefined
+    let initReceivedByOriginalFetch: RequestInit | undefined
+    let thisReceivedByOriginalFetch: unknown
+    let argumentCount = 0
+    window.fetch = vi.fn(async function (
+      this: unknown,
+      input: RequestInfo | URL,
+      init?: RequestInit
+    ) {
+      inputReceivedByOriginalFetch = input
+      initReceivedByOriginalFetch = init
+      thisReceivedByOriginalFetch = this
+      argumentCount = arguments.length
       if (input instanceof Request) {
         bodyUsedBeforeOriginalFetch = input.bodyUsed
         bodyReceivedByOriginalFetch = await input.text()
@@ -274,13 +333,19 @@ describe('fetch —— 请求解析', () => {
       headers: { 'content-type': 'application/json' },
       body: rawBody
     })
+    const init: RequestInit = { headers: { 'x-call-id': 'call-1' } }
+    const callContext = { source: 'test' }
 
     expect(input.bodyUsed).toBe(false)
-    await fetch(input)
+    await Reflect.apply(window.fetch, callContext, [input, init])
 
     expect(bodiesSeenByPolicy).toEqual([{ force: false }])
     expect(bodyUsedBeforeOriginalFetch).toBe(false)
     expect(bodyReceivedByOriginalFetch).toBe(rawBody)
+    expect(inputReceivedByOriginalFetch).toBe(input)
+    expect(initReceivedByOriginalFetch).toBe(init)
+    expect(thisReceivedByOriginalFetch).toBe(callContext)
+    expect(argumentCount).toBe(2)
   })
 })
 

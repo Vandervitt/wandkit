@@ -373,8 +373,7 @@ async function toInterceptedRequest(
   const url = request?.url ?? String(input)
   const method = (init?.method ?? request?.method ?? 'GET').toUpperCase()
   const headers = normalizeHeaders(init?.headers ?? request?.headers)
-  const hasInitBody = init !== undefined && 'body' in init
-  const body = hasInitBody
+  const body = init?.body !== undefined && init.body !== null
     ? parseBody(init.body)
     : await readRequestBody(request)
 

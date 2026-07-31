@@ -54,8 +54,9 @@ Expected: FAIL，表现为安全方法直接放行。
 
 - [ ] **Step 2: 从 clone 读取 Request body**
 
-当 `init` 未显式声明 body 且 Request 自带 body 时，调用 `request.clone().text()`，再复用
-`parseBody()`。读取异常直接向上传播，禁止信息不完整时继续放行。
+当 `init.body` 为 nullish 且 Request 自带 body 时，调用 `request.clone().text()`，再复用
+`parseBody()`；这与 Fetch 沿用输入 Request body 的语义一致。读取异常直接向上传播，禁止
+信息不完整时继续放行。
 
 - [ ] **Step 3: 兼容跨 realm Headers**
 
