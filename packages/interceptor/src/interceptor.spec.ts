@@ -517,6 +517,31 @@ describe('透传与生命周期', () => {
       uninstallA()
     }
   })
+
+  it('外部同名 patch 元数据读取抛错时仍把它当作恢复边界', () => {
+    const baselineFetch = window.fetch
+    const metadataSymbol = Symbol.for('@toolairlock/interceptor.patch')
+    const externalFetch = vi.fn(async () => new Response('{}', { status: 200 })) as typeof fetch
+    Object.defineProperty(externalFetch, metadataSymbol, {
+      get() { throw new Error('metadata denied') }
+    })
+    window.fetch = externalFetch
+    const instanceA = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: vi.fn(async () => true),
+      channels: ['fetch']
+    })
+    const uninstallA = instanceA.install()
+
+    try {
+      expect(() => uninstallA()).not.toThrow()
+      expect(window.fetch).toBe(externalFetch)
+    } finally {
+      window.fetch = baselineFetch
+      uninstallA()
+    }
+  })
 })
 
 describe('闸门自身出错时从严', () => {

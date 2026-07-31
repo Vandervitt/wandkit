@@ -112,17 +112,21 @@ function markPatch<F extends CallableFunction>(
 /** 只接受结构完整的本库元数据；异常或第三方值一律视为外部边界。 */
 function readPatchMetadata(value: unknown): PatchMetadata | undefined {
   if (typeof value !== 'function') return undefined
-  const metadata = (value as CallableFunction & Record<PropertyKey, unknown>)[PATCH_METADATA]
-  if (!metadata || typeof metadata !== 'object') return undefined
-  const candidate = metadata as Partial<PatchMetadata>
-  if (
-    candidate.source !== PATCH_SOURCE ||
-    !isPatchKind(candidate.kind) ||
-    typeof candidate.previous !== 'function' ||
-    !candidate.lifecycle ||
-    typeof candidate.lifecycle.active !== 'boolean'
-  ) return undefined
-  return candidate as PatchMetadata
+  try {
+    const metadata = (value as CallableFunction & Record<PropertyKey, unknown>)[PATCH_METADATA]
+    if (!metadata || typeof metadata !== 'object') return undefined
+    const candidate = metadata as Partial<PatchMetadata>
+    if (
+      candidate.source !== PATCH_SOURCE ||
+      !isPatchKind(candidate.kind) ||
+      typeof candidate.previous !== 'function' ||
+      !candidate.lifecycle ||
+      typeof candidate.lifecycle.active !== 'boolean'
+    ) return undefined
+    return candidate as PatchMetadata
+  } catch (_error) {
+    return undefined
+  }
 }
 
 function isPatchKind(value: unknown): value is PatchKind {
