@@ -4,6 +4,8 @@
 
 基线：`main` @ `ce191bd`
 
+Pull Request：<https://github.com/Vandervitt/wandkit/pull/6>
+
 ## 结论
 
 复审未发现阻止提交的高置信度问题。实现修复了 `InterceptedRequest.url` 与公开契约不一致

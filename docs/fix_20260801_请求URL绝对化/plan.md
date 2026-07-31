@@ -106,7 +106,7 @@ Expected: 全仓测试、类型检查、构建通过，diff 无空白错误。
 `test-results.md` 记录红绿证据、目标测试和完整验证；`review.md` 核对策略顺序、原生参数
 透传、公开 API、跨通道一致性和改动范围。
 
-- [ ] **Step 4: 提交并创建独立 PR**
+- [x] **Step 4: 提交并创建独立 PR**
 
 提交信息使用 `fix:` 中文 Conventional Commit；首次推送严格使用：
 
@@ -115,3 +115,8 @@ git push -u origin fix_20260801_请求URL绝对化:fix_20260801_请求URL绝对�
 ```
 
 创建一个只包含本修复的 PR，目标分支为 `main`，不删除分支。
+
+交付结果：
+
+- 初始提交：`932073a fix: 统一请求快照 URL 为绝对地址`
+- Pull Request：<https://github.com/Vandervitt/wandkit/pull/6>

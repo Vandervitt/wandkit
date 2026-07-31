@@ -4,6 +4,8 @@
 
 基线：`main` @ `ce191bd`
 
+Pull Request：<https://github.com/Vandervitt/wandkit/pull/6>
+
 ## 红测证据
 
 命令：
