@@ -154,7 +154,7 @@ Expected: FAIL。非 LIFO 用例中 B 被 A 的卸载拆除；外部 wrapper 用
 test "$(git branch --show-current)" = "fix_20260731_多实例卸载竞态"
 git add packages/interceptor/src/interceptor.spec.ts
 test "$(git branch --show-current)" = "fix_20260731_多实例卸载竞态"
-git commit -m "test: 复现 Fetch 多实例卸载竞态"
+git commit -m "fix: 复现 Fetch 多实例卸载竞态"
 ```
 
 ### Task 2: XHR 与 Beacon 多实例回归测试
@@ -453,7 +453,7 @@ Expected: FAIL。旧实例卸载会拆掉新 XHR/Beacon 层并覆盖外部方法
 test "$(git branch --show-current)" = "fix_20260731_多实例卸载竞态"
 git add packages/interceptor/src/channels.spec.ts
 test "$(git branch --show-current)" = "fix_20260731_多实例卸载竞态"
-git commit -m "test: 复现请求通道多实例卸载竞态"
+git commit -m "fix: 复现请求通道多实例卸载竞态"
 ```
 
 ### Task 3: Patch 元数据与 Fetch 安全卸载
