@@ -369,20 +369,39 @@ async function toInterceptedRequest(
   id: string
 ): Promise<InterceptedRequest> {
   const [input, init] = args
-  const isRequestObject = typeof Request !== 'undefined' && input instanceof Request
-  const url = isRequestObject ? input.url : String(input)
-  const method = (init?.method ?? (isRequestObject ? input.method : 'GET')).toUpperCase()
-  const headers = normalizeHeaders(init?.headers ?? (isRequestObject ? input.headers : undefined))
+  const request = isRequestLike(input) ? input : undefined
+  const url = request?.url ?? String(input)
+  const method = (init?.method ?? request?.method ?? 'GET').toUpperCase()
+  const headers = normalizeHeaders(init?.headers ?? request?.headers)
+  const body = init?.body !== undefined && init.body !== null
+    ? parseBody(init.body)
+    : await readRequestBody(request)
 
   return {
     id,
     method,
     url,
     headers,
-    body: parseBody(init?.body),
+    body,
     channel: 'fetch',
     timestamp: Date.now()
   }
+}
+
+/** Request 会跨 iframe / window 流转，不能依赖当前 realm 的构造器。 */
+function isRequestLike(input: RequestInfo | URL): input is Request {
+  if (typeof input !== 'object' || input === null) return false
+  const candidate = input as Partial<Request>
+  return typeof candidate.url === 'string' &&
+    typeof candidate.method === 'string' &&
+    candidate.headers !== undefined &&
+    typeof candidate.clone === 'function'
+}
+
+/** 只读取 clone，保证真正传给原始 fetch 的 Request 仍可消费。 */
+async function readRequestBody(request: Request | undefined): Promise<unknown> {
+  if (!request || request.body === null) return undefined
+  return parseBody(await request.clone().text())
 }
 
 function normalizeHeaders(
@@ -390,12 +409,15 @@ function normalizeHeaders(
 ): Readonly<Record<string, string>> {
   const collected: Record<string, string> = {}
   if (!source) return collected
-  if (typeof Headers !== 'undefined' && source instanceof Headers) {
-    source.forEach((value, key) => { collected[key.toLowerCase()] = value })
-    return collected
-  }
   if (Array.isArray(source)) {
     source.forEach(([key, value]) => { collected[String(key).toLowerCase()] = String(value) })
+    return collected
+  }
+  if (typeof (source as Headers).forEach === 'function') {
+    const headers = source as Headers
+    headers.forEach((value, key) => {
+      collected[key.toLowerCase()] = value
+    })
     return collected
   }
   Object.entries(source).forEach(([key, value]) => {
