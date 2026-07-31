@@ -200,6 +200,176 @@ describe('XMLHttpRequest', () => {
     expect(sent).toHaveLength(0)
   })
 
+  it('先卸载旧 XHR 实例只移除该层，最后恢复 open 和 send', async () => {
+    const baselineOpen = XMLHttpRequest.prototype.open
+    const baselineSend = XMLHttpRequest.prototype.send
+    const confirmA = vi.fn(async () => true)
+    const confirmB = vi.fn(async () => true)
+    const instanceA = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: confirmA,
+      channels: ['xhr']
+    })
+    const instanceB = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: confirmB,
+      channels: ['xhr']
+    })
+    const uninstallA = instanceA.install()
+    const uninstallB = instanceB.install()
+
+    try {
+      await xhr('DELETE', '/api/users/u_1')
+      expect(confirmB).toHaveBeenCalledTimes(1)
+      expect(confirmA).toHaveBeenCalledTimes(1)
+      expect(sent).toHaveLength(1)
+
+      confirmA.mockClear()
+      confirmB.mockClear()
+      sent = []
+      uninstallA()
+      await xhr('DELETE', '/api/users/u_2')
+
+      expect(confirmB).toHaveBeenCalledTimes(1)
+      expect(confirmA).not.toHaveBeenCalled()
+      expect(sent).toEqual([
+        { channel: 'xhr', method: 'DELETE', url: '/api/users/u_2' }
+      ])
+
+      uninstallB()
+      expect(XMLHttpRequest.prototype.open).toBe(baselineOpen)
+      expect(XMLHttpRequest.prototype.send).toBe(baselineSend)
+    } finally {
+      uninstallB()
+      uninstallA()
+      XMLHttpRequest.prototype.open = baselineOpen
+      XMLHttpRequest.prototype.send = baselineSend
+    }
+  })
+
+  it('按 LIFO 卸载的 XHR 旧 send 引用只透传给前一激活层', async () => {
+    const baselineOpen = XMLHttpRequest.prototype.open
+    const baselineSend = XMLHttpRequest.prototype.send
+    const confirmA = vi.fn(async () => true)
+    const confirmB = vi.fn(async () => true)
+    const instanceA = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: confirmA,
+      channels: ['xhr']
+    })
+    const instanceB = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: confirmB,
+      channels: ['xhr']
+    })
+    const uninstallA = instanceA.install()
+    const wrapperAOpen = XMLHttpRequest.prototype.open
+    const wrapperASend = XMLHttpRequest.prototype.send
+    const uninstallB = instanceB.install()
+    const staleSendB = XMLHttpRequest.prototype.send
+
+    try {
+      uninstallB()
+      expect(XMLHttpRequest.prototype.open).toBe(wrapperAOpen)
+      expect(XMLHttpRequest.prototype.send).toBe(wrapperASend)
+
+      const request = new XMLHttpRequest()
+      request.open('DELETE', '/api/users/u_1')
+      staleSendB.call(request, 'body')
+      await new Promise(resolve => setTimeout(resolve, 0))
+
+      expect(confirmB).not.toHaveBeenCalled()
+      expect(confirmA).toHaveBeenCalledTimes(1)
+      expect(sent).toHaveLength(1)
+
+      uninstallA()
+      expect(XMLHttpRequest.prototype.open).toBe(baselineOpen)
+      expect(XMLHttpRequest.prototype.send).toBe(baselineSend)
+    } finally {
+      uninstallB()
+      uninstallA()
+      XMLHttpRequest.prototype.open = baselineOpen
+      XMLHttpRequest.prototype.send = baselineSend
+    }
+  })
+
+  it('XHR 卸载分别保留外部 open，并让其持有的旧 open 透明透传', async () => {
+    const baselineOpen = XMLHttpRequest.prototype.open
+    const baselineSend = XMLHttpRequest.prototype.send
+    const confirmA = vi.fn(async () => true)
+    const instanceA = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: confirmA,
+      channels: ['xhr']
+    })
+    const uninstallA = instanceA.install()
+    const interceptedOpen = XMLHttpRequest.prototype.open
+    const externalOpen = function (
+      this: XMLHttpRequest,
+      method: string,
+      url: string | URL,
+      ...rest: unknown[]
+    ) {
+      return (interceptedOpen as (...args: unknown[]) => void)
+        .apply(this, [method, url, ...rest])
+    } as typeof XMLHttpRequest.prototype.open
+    XMLHttpRequest.prototype.open = externalOpen
+
+    try {
+      uninstallA()
+      expect(XMLHttpRequest.prototype.open).toBe(externalOpen)
+      expect(XMLHttpRequest.prototype.send).toBe(baselineSend)
+
+      await xhr('DELETE', '/api/users/u_1')
+      expect(confirmA).not.toHaveBeenCalled()
+      expect(sent).toHaveLength(1)
+    } finally {
+      XMLHttpRequest.prototype.open = baselineOpen
+      XMLHttpRequest.prototype.send = baselineSend
+      uninstallA()
+    }
+  })
+
+  it('XHR 卸载分别保留外部 send，并让其持有的旧 send 透明透传', async () => {
+    const baselineOpen = XMLHttpRequest.prototype.open
+    const baselineSend = XMLHttpRequest.prototype.send
+    const confirmA = vi.fn(async () => true)
+    const instanceA = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: confirmA,
+      channels: ['xhr']
+    })
+    const uninstallA = instanceA.install()
+    const interceptedSend = XMLHttpRequest.prototype.send
+    const externalSend = function (
+      this: XMLHttpRequest,
+      ...args: Parameters<typeof XMLHttpRequest.prototype.send>
+    ) {
+      return interceptedSend.apply(this, args)
+    } as typeof XMLHttpRequest.prototype.send
+    XMLHttpRequest.prototype.send = externalSend
+
+    try {
+      uninstallA()
+      expect(XMLHttpRequest.prototype.open).toBe(baselineOpen)
+      expect(XMLHttpRequest.prototype.send).toBe(externalSend)
+
+      await xhr('DELETE', '/api/users/u_1')
+      expect(confirmA).not.toHaveBeenCalled()
+      expect(sent).toHaveLength(1)
+    } finally {
+      XMLHttpRequest.prototype.open = baselineOpen
+      XMLHttpRequest.prototype.send = baselineSend
+      uninstallA()
+    }
+  })
+
   it('拒绝时请求根本不发出', async () => {
     setup({ confirm: vi.fn(async () => false) })
 
@@ -288,6 +458,132 @@ describe('navigator.sendBeacon', () => {
 
     expect(accepted).toBe(true)
     expect(sent).toHaveLength(1)
+  })
+
+  it('先卸载旧 Beacon 实例只移除该层，最后恢复基线函数', () => {
+    const baselineBeacon = navigator.sendBeacon
+    const verdictA = vi.fn()
+    const verdictB = vi.fn()
+    const policy: InterceptionPolicy = {
+      allow: [{ id: 'metrics', match: { url: '/api/metrics' } }]
+    }
+    const instanceA = createInterceptor({
+      policy,
+      attribution: createStaticAttribution(true),
+      confirm: vi.fn(async () => true),
+      channels: ['beacon'],
+      onVerdict: verdictA
+    })
+    const instanceB = createInterceptor({
+      policy,
+      attribution: createStaticAttribution(true),
+      confirm: vi.fn(async () => true),
+      channels: ['beacon'],
+      onVerdict: verdictB
+    })
+    const uninstallA = instanceA.install()
+    const uninstallB = instanceB.install()
+
+    try {
+      expect(navigator.sendBeacon('/api/metrics', '{}')).toBe(true)
+      expect(verdictB).toHaveBeenCalledTimes(1)
+      expect(verdictA).toHaveBeenCalledTimes(1)
+
+      verdictA.mockClear()
+      verdictB.mockClear()
+      sent = []
+      uninstallA()
+      expect(navigator.sendBeacon('/api/metrics', '{}')).toBe(true)
+      expect(verdictB).toHaveBeenCalledTimes(1)
+      expect(verdictA).not.toHaveBeenCalled()
+      expect(sent).toHaveLength(1)
+
+      uninstallB()
+      expect(navigator.sendBeacon).toBe(baselineBeacon)
+    } finally {
+      uninstallB()
+      uninstallA()
+      navigator.sendBeacon = baselineBeacon
+    }
+  })
+
+  it('按 LIFO 卸载的 Beacon 旧引用只透传给前一激活层', () => {
+    const baselineBeacon = navigator.sendBeacon
+    const verdictA = vi.fn()
+    const verdictB = vi.fn()
+    const policy: InterceptionPolicy = {
+      allow: [{ id: 'metrics', match: { url: '/api/metrics' } }]
+    }
+    const instanceA = createInterceptor({
+      policy,
+      attribution: createStaticAttribution(true),
+      confirm: vi.fn(async () => true),
+      channels: ['beacon'],
+      onVerdict: verdictA
+    })
+    const instanceB = createInterceptor({
+      policy,
+      attribution: createStaticAttribution(true),
+      confirm: vi.fn(async () => true),
+      channels: ['beacon'],
+      onVerdict: verdictB
+    })
+    const uninstallA = instanceA.install()
+    const wrapperA = navigator.sendBeacon
+    const uninstallB = instanceB.install()
+    const staleBeaconB = navigator.sendBeacon
+
+    try {
+      uninstallB()
+      expect(navigator.sendBeacon).toBe(wrapperA)
+      expect(staleBeaconB.call(navigator, '/api/metrics', '{}')).toBe(true)
+      expect(verdictB).not.toHaveBeenCalled()
+      expect(verdictA).toHaveBeenCalledTimes(1)
+      expect(sent).toHaveLength(1)
+
+      uninstallA()
+      expect(navigator.sendBeacon).toBe(baselineBeacon)
+    } finally {
+      uninstallB()
+      uninstallA()
+      navigator.sendBeacon = baselineBeacon
+    }
+  })
+
+  it('Beacon 卸载不覆盖外部 wrapper，旧引用只透明透传', () => {
+    const baselineBeacon = navigator.sendBeacon
+    const verdictA = vi.fn()
+    const policy: InterceptionPolicy = {
+      allow: [{ id: 'metrics', match: { url: '/api/metrics' } }]
+    }
+    const instanceA = createInterceptor({
+      policy,
+      attribution: createStaticAttribution(true),
+      confirm: vi.fn(async () => true),
+      channels: ['beacon'],
+      onVerdict: verdictA
+    })
+    const uninstallA = instanceA.install()
+    const interceptedBeacon = navigator.sendBeacon
+    const externalBeacon = vi.fn(function (
+      this: Navigator,
+      ...args: Parameters<typeof navigator.sendBeacon>
+    ) {
+      return interceptedBeacon.apply(this, args)
+    }) as typeof navigator.sendBeacon
+    navigator.sendBeacon = externalBeacon
+
+    try {
+      uninstallA()
+      expect(navigator.sendBeacon).toBe(externalBeacon)
+      expect(navigator.sendBeacon('/api/metrics', '{}')).toBe(true)
+      expect(externalBeacon).toHaveBeenCalledTimes(1)
+      expect(verdictA).not.toHaveBeenCalled()
+      expect(sent).toHaveLength(1)
+    } finally {
+      navigator.sendBeacon = baselineBeacon
+      uninstallA()
+    }
   })
 })
 
