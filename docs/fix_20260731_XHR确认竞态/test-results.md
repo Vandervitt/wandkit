@@ -38,6 +38,20 @@ npx vitest run packages/interceptor/src/channels.spec.ts
 
 结果：退出码 0，1 个测试文件、13 个测试全部通过。
 
+## 独立审查补充红绿循环
+
+独立审查发现：等待确认期间卸载 interceptor 后，旧 continuation 仍持有原始 `send()`，
+可能在卸载期间重新 `open()` 后发送新配置。增加卸载竞态测试并执行目标命令：
+
+```bash
+npx vitest run packages/interceptor/src/channels.spec.ts
+```
+
+红灯结果：退出码 1，14 个测试中新增 1 个失败，`sent` 期望长度 0、实际长度 1。
+
+加入安装周期 `active` 标记、卸载时同步失活后重跑：退出码 0，14 个测试全部通过；包级
+类型检查退出码 0。
+
 包级类型检查：
 
 ```bash
@@ -56,7 +70,7 @@ npm run verify
 
 结果：退出码 0。
 
-- Vitest：46 个测试文件、643 个测试全部通过。
+- Vitest：46 个测试文件、644 个测试全部通过。
 - TypeScript：5 个 workspace 的 `tsc --noEmit` 全部通过。
 - Build：5 个 workspace 的 tsup ESM、CJS、DTS 构建全部通过。
 - 测试输出包含 jsdom 对 `HTMLFormElement.requestSubmit()` 未实现的既有 stderr 提示，

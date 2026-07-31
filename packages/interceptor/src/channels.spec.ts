@@ -156,6 +156,26 @@ describe('XMLHttpRequest', () => {
     expect(sent).toHaveLength(0)
   })
 
+  it('等待确认期间卸载会使旧发送失效', async () => {
+    let approveOld!: (allowed: boolean) => void
+    const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+      () => new Promise<boolean>(resolve => { approveOld = resolve })
+    )
+    setup({ confirm })
+    const request = new XMLHttpRequest()
+    request.open('DELETE', '/api/users/u_1')
+    request.send('old-body')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    uninstall?.()
+    uninstall = undefined
+    request.open('POST', '/api/transfers')
+    approveOld(true)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(sent).toHaveLength(0)
+  })
+
   it('拒绝时请求根本不发出', async () => {
     setup({ confirm: vi.fn(async () => false) })
 

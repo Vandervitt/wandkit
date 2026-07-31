@@ -275,6 +275,7 @@ function patchXhr(
   if (!XHR?.prototype) return () => undefined
   const originalOpen = XHR.prototype.open
   const originalSend = XHR.prototype.send
+  let active = true
 
   XHR.prototype.open = function patchedOpen(
     this: XMLHttpRequest,
@@ -305,13 +306,14 @@ function patchXhr(
       // 被拒时什么也不做：请求从未发出，宿主的 error/timeout 处理不会被触发。
       // 这与 fetch 侧抛 RequestDeniedError 不同——XHR 没有可以抛错的返回值。
       // 等待期间重新 open() 会替换状态对象；旧批准不能发送新的 XHR 配置。
-      if (allowed && xhrState.get(this) === state) {
+      if (allowed && active && xhrState.get(this) === state) {
         originalSend.call(this, body ?? null)
       }
     })
   } as typeof XMLHttpRequest.prototype.send
 
   return () => {
+    active = false
     XHR.prototype.open = originalOpen
     XHR.prototype.send = originalSend
   }

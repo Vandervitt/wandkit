@@ -91,6 +91,37 @@ npx vitest run packages/interceptor/src/channels.spec.ts
 Expected: FAIL，两个用例在 `approveOld(true)` 后均已出现发送，证明旧批准没有绑定原
 `open()` 生命周期。
 
+- [ ] **Step 4: 写入卸载期间旧发送失效测试**
+
+```ts
+it('等待确认期间卸载会使旧发送失效', async () => {
+  let approveOld!: (allowed: boolean) => void
+  setup({
+    confirm: vi.fn(() => new Promise<boolean>(resolve => { approveOld = resolve }))
+  })
+  const request = new XMLHttpRequest()
+  request.open('DELETE', '/api/users/u_1')
+  request.send('old-body')
+  await new Promise(resolve => setTimeout(resolve, 0))
+
+  uninstall?.()
+  uninstall = undefined
+  request.open('POST', '/api/transfers')
+  approveOld(true)
+  await new Promise(resolve => setTimeout(resolve, 0))
+
+  expect(sent).toHaveLength(0)
+})
+```
+
+Run:
+
+```bash
+npx vitest run packages/interceptor/src/channels.spec.ts
+```
+
+Expected: FAIL，卸载后旧批准仍调用此前捕获的原始 `send()`，发送新的 POST 配置。
+
 ### Task 2: 用 open 状态身份使旧 continuation 失效
 
 **Files:**
@@ -116,11 +147,19 @@ const request: InterceptedRequest = {
 - [ ] **Step 2: 批准后校验生命周期未变化**
 
 ```ts
+let active = true
+
 void gate(request).then(allowed => {
-  if (allowed && xhrState.get(this) === state) {
+  if (allowed && active && xhrState.get(this) === state) {
     originalSend.call(this, body ?? null)
   }
 })
+
+return () => {
+  active = false
+  XHR.prototype.open = originalOpen
+  XHR.prototype.send = originalSend
+}
 ```
 
 - [ ] **Step 3: 运行目标测试确认转绿**
@@ -131,7 +170,7 @@ Run:
 npx vitest run packages/interceptor/src/channels.spec.ts
 ```
 
-Expected: PASS，13 个测试全部通过。
+Expected: PASS，14 个测试全部通过。
 
 - [ ] **Step 4: 运行 interceptor 包类型检查**
 

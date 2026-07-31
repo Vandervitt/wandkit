@@ -32,6 +32,7 @@ open(POST, /api/transfers)    → XHR 实例切换到 state B
 ## 目标
 
 - 等待确认期间再次 `open()` 时，先前 `send()` 的 continuation 必须失效。
+- 等待确认期间卸载 interceptor 时，该安装周期的所有 continuation 必须失效。
 - 即使新旧 `open()` 的 method 与 URL 相同，也应按重新初始化处理并使旧发送失效。
 - 新配置只有再次调用 `send()` 并完成自己的判定后才能真正发送。
 - 未发生重新 `open()` 时，现有允许、拒绝、body 解析和异步时序保持不变。
@@ -48,13 +49,14 @@ open(POST, /api/transfers)    → XHR 实例切换到 state B
 
 `patchedOpen()` 每次都会向 `xhrState` 写入一个新的 `XhrCallState` 对象。`patchedSend()`
 保存当时的对象引用；确认结束后，只有 WeakMap 中的当前引用仍与快照相同才调用原始
-`send()`：
+`send()`。同时每次 `patchXhr()` 安装维护一个 `active` 标记，卸载时先置为 `false`，
+使恢复原型后的旧确认无法继续发送：
 
 ```ts
 const state = xhrState.get(this)
 
 void gate(request).then(allowed => {
-  if (allowed && xhrState.get(this) === state) {
+  if (allowed && active && xhrState.get(this) === state) {
     originalSend.call(this, body ?? null)
   }
 })
@@ -77,6 +79,8 @@ open B ──→ xhrState = stateB         │ approved
                                      └─ 丢弃旧 continuation，不发送
 
 send B ──→ capture stateB ──→ gate(requestB) ──→ stateB === stateB ──→ send
+
+uninstall ──→ active = false ──→ 旧 gate 即使批准也不发送
 ```
 
 ## 涉及文件
@@ -101,5 +105,6 @@ send B ──→ capture stateB ──→ gate(requestB) ──→ stateB === st
 1. 旧请求等待确认时重新 `open()`，批准旧请求不会发送新配置。
 2. 新配置再次 `send()` 后会生成独立确认，并在批准后只发送一次。
 3. 确认回调看到的旧、新 method、URL 与 body 各自正确。
-4. 现有 XHR、fetch、beacon 测试不回归。
-5. `npm run verify` 全部通过。
+4. 等待确认期间卸载后，旧批准不会发送卸载期间的新配置。
+5. 现有 XHR、fetch、beacon 测试不回归。
+6. `npm run verify` 全部通过。
