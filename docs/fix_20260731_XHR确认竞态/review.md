@@ -4,8 +4,8 @@
 
 | 文件 | 状态 | 审查结论 |
 |---|---|---|
-| `packages/interceptor/src/interceptor.ts` | 修改 | 仅增加 XHR open 状态身份校验 |
-| `packages/interceptor/src/channels.spec.ts` | 修改 | 增加 2 个重新 open 竞态测试 |
+| `packages/interceptor/src/interceptor.ts` | 修改 | 增加 XHR 状态身份校验、安装周期失活和卸载闭包幂等保护 |
+| `packages/interceptor/src/channels.spec.ts` | 修改 | 增加 4 个重新 open、卸载和跨重装竞态测试 |
 | `docs/fix_20260731_XHR确认竞态/*` | 新增 | 设计、计划、测试和审查记录 |
 
 未修改 fetch、beacon、规则求值、确认 UI、公开类型或包导出。
@@ -17,6 +17,7 @@
 | 不同配置重新 open 使旧发送失效 | 延迟旧确认，切到 POST 后批准旧 DELETE，网络记录保持空 | 通过 |
 | 相同参数重新 open 仍视为新生命周期 | 同 method/URL 重开后批准旧请求，网络记录保持空 | 通过 |
 | 卸载使旧安装周期失效 | 卸载后原生 open 新配置，批准旧请求，网络记录保持空 | 通过 |
+| 旧卸载闭包不影响新安装 | 重装后重复调用第一次卸载函数，新安装保持启用且待确认请求不发送 | 通过 |
 | 新配置必须独立确认 | 新配置再次 send 后出现第二次 confirm，批准后只发送一次 | 通过 |
 | 确认内容与各自请求一致 | 断言旧 DELETE/old-body 与新 POST/new-body 的请求快照 | 通过 |
 | 无重新 open 时行为不变 | 原有允许、拒绝、body、异步时序测试全部通过 | 通过 |
@@ -32,6 +33,8 @@
   触发网络发送。
 - 每个 `patchXhr()` 安装周期拥有独立 `active` 标记；卸载时先失活再恢复原型，已在等待
   的确认无法跨越卸载边界继续发送。
+- 每个成功 `install()` 返回的闭包拥有独立 `cleaned` 标记；旧闭包首次拆除自己的安装后
+  即永久失效，不会在后续重装时借共享 `installed` 状态拆掉新的 patch。
 - 新请求仍使用调用方传给新 `send()` 的 body，原始 `send()` 的 `this` 与参数调用方式未改。
 - 新增成本仅为确认 Promise 落地时的一次 WeakMap 查询和严格相等比较。
 
@@ -50,4 +53,6 @@
 - Critical：无。
 - Important：审查发现卸载后旧 continuation 仍可发送新配置。已增加先失败后通过的卸载
   竞态测试，并以安装周期 `active` 标记修复。
+- Important：第二轮审查发现旧卸载函数在重装后重复调用会拆掉新安装。新增回归测试先
+  复现 `installed` 从 `true` 错误变为 `false`，再用闭包局部 `cleaned` 标记修复。
 - Minor：无。

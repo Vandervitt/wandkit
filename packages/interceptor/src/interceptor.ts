@@ -138,6 +138,7 @@ export function createInterceptor(options: InterceptorOptions): Interceptor {
       // 幂等：叠两层 patch 会让同一个请求被判定两次。
       if (installed || !view) return () => undefined
       installed = true
+      let cleaned = false
       const restores: Array<() => void> = []
 
       if (channels.has('fetch')) restores.push(patchFetch(view, gate, nextId))
@@ -147,6 +148,8 @@ export function createInterceptor(options: InterceptorOptions): Interceptor {
       }
 
       return () => {
+        if (cleaned) return
+        cleaned = true
         if (!installed) return
         installed = false
         restores.forEach(restore => restore())

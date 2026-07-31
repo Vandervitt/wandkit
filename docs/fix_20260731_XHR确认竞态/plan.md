@@ -182,7 +182,47 @@ npm run typecheck --workspace @toolairlock/interceptor
 
 Expected: 退出码 0。
 
-### Task 3: 完整验证与审查记录
+### Task 3: 保证卸载回调按安装周期幂等
+
+**Files:**
+- Modify: `packages/interceptor/src/channels.spec.ts`
+- Modify: `packages/interceptor/src/interceptor.ts:136-155`
+
+- [x] **Step 1: 写入旧卸载闭包跨重装的失败测试**
+
+第一次安装并卸载后重新安装，随后再次调用第一次安装返回的旧卸载函数。断言新安装仍为
+`installed`，且其待确认 XHR 不会因 patch 被旧闭包拆除而绕过闸门。
+
+- [x] **Step 2: 运行目标测试确认旧实现失败**
+
+Run:
+
+```bash
+npx vitest run packages/interceptor/src/channels.spec.ts
+```
+
+Expected: FAIL，15 个测试中新增用例失败，`interceptor.installed` 期望为 `true`、实际为
+`false`，证明旧卸载闭包错误拆除了新安装。
+
+- [x] **Step 3: 用闭包局部状态保证按安装周期幂等**
+
+每次成功安装创建独立的 `cleaned` 标记；卸载闭包首次执行时先标记完成，后续重复调用
+直接返回，不再读取或修改当前安装周期的共享 `installed` 状态。
+
+- [x] **Step 4: 运行目标测试与包级验证确认转绿**
+
+Run:
+
+```bash
+npx vitest run packages/interceptor/src/channels.spec.ts \
+  packages/interceptor/src/interceptor.spec.ts
+npm run typecheck --workspace @toolairlock/interceptor
+git diff --check
+```
+
+Expected: 2 个测试文件、43 个测试全部通过；类型检查和 diff 检查退出码 0。
+
+### Task 4: 完整验证与审查记录
 
 **Files:**
 - Create: `docs/fix_20260731_XHR确认竞态/test-results.md`
@@ -213,7 +253,7 @@ Expected: 无输出，退出码 0。
 `test-results.md` 记录基线、红灯、绿灯、完整测试数量和命令退出码；`review.md` 核对旧
 continuation 失效、新请求独立确认、同参数重新 open、原 send 参数透传、无公开 API 变化。
 
-### Task 4: 提交、推送与 PR
+### Task 5: 提交、推送与 PR
 
 - [ ] **Step 1: 提交方案文档**
 
@@ -233,13 +273,22 @@ git add -- packages/interceptor/src/interceptor.ts \
 git commit -m 'fix: 使重新打开的 XHR 旧发送失效'
 ```
 
-- [ ] **Step 3: 首次推送同名分支**
+- [ ] **Step 3: 提交卸载闭包按安装周期幂等修复**
+
+```bash
+git add -- packages/interceptor/src/interceptor.ts \
+  packages/interceptor/src/channels.spec.ts \
+  'docs/fix_20260731_XHR确认竞态/'
+git commit -m 'fix: 保证卸载回调按安装周期幂等'
+```
+
+- [ ] **Step 4: 首次推送同名分支**
 
 ```bash
 git push -u origin fix_20260731_XHR确认竞态:fix_20260731_XHR确认竞态
 ```
 
-- [ ] **Step 4: 创建独立 PR**
+- [ ] **Step 5: 创建独立 PR**
 
 以 `main` 为目标创建 PR，正文包含竞态时序、对象身份方案、TDD 红绿证据、完整验证结果和
 独立审查结论；不自动合并。

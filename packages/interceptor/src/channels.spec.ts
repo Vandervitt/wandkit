@@ -176,6 +176,30 @@ describe('XMLHttpRequest', () => {
     expect(sent).toHaveLength(0)
   })
 
+  it('旧卸载函数在重装后重复调用不会拆掉新安装', async () => {
+    let approveOld!: (allowed: boolean) => void
+    const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+      () => new Promise<boolean>(resolve => { approveOld = resolve })
+    )
+    setup({ confirm })
+    const firstUninstall = uninstall as () => void
+    firstUninstall()
+    uninstall = interceptor?.install()
+
+    const request = new XMLHttpRequest()
+    request.open('DELETE', '/api/users/u_1')
+    request.send('old-body')
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    firstUninstall()
+    request.open('POST', '/api/transfers')
+    approveOld(true)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(interceptor?.installed).toBe(true)
+    expect(sent).toHaveLength(0)
+  })
+
   it('拒绝时请求根本不发出', async () => {
     setup({ confirm: vi.fn(async () => false) })
 

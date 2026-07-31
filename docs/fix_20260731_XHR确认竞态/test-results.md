@@ -52,6 +52,27 @@ npx vitest run packages/interceptor/src/channels.spec.ts
 加入安装周期 `active` 标记、卸载时同步失活后重跑：退出码 0，14 个测试全部通过；包级
 类型检查退出码 0。
 
+第二轮独立审查又发现：第一次安装返回的卸载闭包在已执行、重新安装后再次调用，会读取
+共享的 `installed = true`，从而错误拆除第二次安装。增加跨重装重复调用旧卸载函数的
+回归测试后执行：
+
+```bash
+npx vitest run packages/interceptor/src/channels.spec.ts
+```
+
+红灯结果：退出码 1，15 个测试中新增 1 个失败；`interceptor.installed` 期望为 `true`、
+实际为 `false`。
+
+为每个成功安装返回的闭包增加局部 `cleaned` 标记后，执行目标测试：
+
+```bash
+npx vitest run packages/interceptor/src/channels.spec.ts \
+  packages/interceptor/src/interceptor.spec.ts
+```
+
+绿灯结果：退出码 0，2 个测试文件、43 个测试全部通过；包级类型检查及
+`git diff --check` 均退出码 0。
+
 包级类型检查：
 
 ```bash
@@ -70,7 +91,7 @@ npm run verify
 
 结果：退出码 0。
 
-- Vitest：46 个测试文件、644 个测试全部通过。
+- Vitest：46 个测试文件、645 个测试全部通过。
 - TypeScript：5 个 workspace 的 `tsc --noEmit` 全部通过。
 - Build：5 个 workspace 的 tsup ESM、CJS、DTS 构建全部通过。
 - 测试输出包含 jsdom 对 `HTMLFormElement.requestSubmit()` 未实现的既有 stderr 提示，
