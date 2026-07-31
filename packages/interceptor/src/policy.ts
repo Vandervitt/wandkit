@@ -143,12 +143,20 @@ function matchesMethod(
  */
 function matchesUrl(request: InterceptedRequest, matcher: RequestMatcher): boolean {
   if (matcher.url === undefined) return true
-  if (matcher.url instanceof RegExp) return matcher.url.test(request.url)
+  if (matcher.url instanceof RegExp) return testRegExp(matcher.url, request.url)
 
   const target = matcher.url.startsWith('/')
     ? pathnameOf(request.url)
     : request.url
   return compileUrlPattern(matcher.url).test(target)
+}
+
+function testRegExp(pattern: RegExp, value: string): boolean {
+  // g/y 的 test() 会读写 lastIndex；规则判定必须独立于上一次请求留下的游标。
+  const candidate = pattern.global || pattern.sticky
+    ? new RegExp(pattern.source, pattern.flags)
+    : pattern
+  return candidate.test(value)
 }
 
 function pathnameOf(url: string): string {

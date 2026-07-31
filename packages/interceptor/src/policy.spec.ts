@@ -212,6 +212,30 @@ describe('evaluateRequest —— 规则求值出错时一律朝「更需要确�
   })
 })
 
+describe('RegExp URL 规则的确定性', () => {
+  it.each([
+    ['g', /\/api\/users\//g],
+    ['y', /^https:\/\/app\.example\.com\/api\/users/y]
+  ])('带 %s 标志的危险规则重复判定不会间歇性降级', (_flag, pattern) => {
+    const policy: InterceptionPolicy = {
+      danger: [{ id: 'danger-users', match: { url: pattern }}]
+    }
+
+    const reasons = [evaluate(policy), evaluate(policy), evaluate(policy)]
+      .map(result => result.reason)
+
+    expect(reasons).toEqual(['danger_list', 'danger_list', 'danger_list'])
+  })
+
+  it.each([
+    ['g', /\/api\/users\//g],
+    ['y', /^https:\/\/app\.example\.com\/api\/users/y]
+  ])('带 %s 标志的正则不会被一次判定修改 lastIndex', (_flag, pattern) => {
+    expect(matchesRequest(request(), { url: pattern })).toBe(true)
+    expect(pattern.lastIndex).toBe(0)
+  })
+})
+
 describe('matchesRequest', () => {
   it('方法匹配大小写不敏感', () => {
     expect(matchesRequest(request({ method: 'post' }), { method: 'POST' })).toBe(true)
