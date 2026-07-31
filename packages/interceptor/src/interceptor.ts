@@ -147,19 +147,33 @@ export function createInterceptor(options: InterceptorOptions): Interceptor {
       let cleaned = false
       const restores: Array<() => void> = []
 
-      if (channels.has('fetch')) restores.push(patchFetch(view, gate, nextId))
-      if (channels.has('xhr')) restores.push(patchXhr(view, gate, nextId))
-      if (channels.has('beacon')) {
-        restores.push(patchBeacon(view, options, nextId))
+      try {
+        if (channels.has('fetch')) restores.push(patchFetch(view, gate, nextId))
+        if (channels.has('xhr')) restores.push(patchXhr(view, gate, nextId))
+        if (channels.has('beacon')) {
+          restores.push(patchBeacon(view, options, nextId))
+        }
+        if (channels.has('form')) restores.push(patchForm(view, gate, nextId))
+      } catch (error) {
+        for (let index = restores.length - 1; index >= 0; index -= 1) {
+          try {
+            restores[index]()
+          } catch (_restoreError) {
+            // 回滚失败不能覆盖最初的安装错误。
+          }
+        }
+        installed = false
+        throw error
       }
-      if (channels.has('form')) restores.push(patchForm(view, gate, nextId))
 
       return () => {
         if (cleaned) return
         cleaned = true
         if (!installed) return
         installed = false
-        restores.forEach(restore => restore())
+        for (let index = restores.length - 1; index >= 0; index -= 1) {
+          restores[index]()
+        }
       }
     }
   }

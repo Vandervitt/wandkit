@@ -380,3 +380,81 @@ describe('批准后的安全重放', () => {
     expect(form.querySelectorAll('[data-toolairlock-replay]')).toHaveLength(0)
   })
 })
+
+describe('事务式安装', () => {
+  it('form 监听安装失败会回滚此前安装的所有通道', () => {
+    const previousFetch = window.fetch
+    const previousBeacon = navigator.sendBeacon
+    const baselineFetch = vi.fn(async () => new Response('{}')) as typeof fetch
+    const baselineOpen = XMLHttpRequest.prototype.open
+    const baselineSend = XMLHttpRequest.prototype.send
+    const baselineBeacon = vi.fn(() => true) as typeof navigator.sendBeacon
+    const baselineSubmit = HTMLFormElement.prototype.submit
+    window.fetch = baselineFetch
+    navigator.sendBeacon = baselineBeacon
+    const instance = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: vi.fn(async () => true),
+      channels: ['fetch', 'xhr', 'beacon', 'form']
+    })
+    const addEventListener = window.addEventListener.bind(window)
+    vi.spyOn(window, 'addEventListener').mockImplementation((type, listener, options) => {
+      if (type === 'submit') throw new Error('submit listener denied')
+      addEventListener(type, listener, options)
+    })
+
+    try {
+      expect(() => instance.install()).toThrow('submit listener denied')
+      expect(instance.installed).toBe(false)
+      expect(window.fetch).toBe(baselineFetch)
+      expect(XMLHttpRequest.prototype.open).toBe(baselineOpen)
+      expect(XMLHttpRequest.prototype.send).toBe(baselineSend)
+      expect(navigator.sendBeacon).toBe(baselineBeacon)
+      expect(HTMLFormElement.prototype.submit).toBe(baselineSubmit)
+    } finally {
+      window.fetch = previousFetch
+      XMLHttpRequest.prototype.open = baselineOpen
+      XMLHttpRequest.prototype.send = baselineSend
+      navigator.sendBeacon = previousBeacon
+      HTMLFormElement.prototype.submit = baselineSubmit
+    }
+  })
+
+  it('不兼容的共享注册表会拒绝安装且不覆盖外部值', () => {
+    const registrySymbol = Symbol.for('@toolairlock/interceptor.form-registry')
+    const registryHost = window as unknown as Record<PropertyKey, unknown>
+    const previousDescriptor = Object.getOwnPropertyDescriptor(window, registrySymbol)
+    const externalRegistry = { owner: 'host' }
+    const previousFetch = window.fetch
+    const baselineFetch = vi.fn(async () => new Response('{}')) as typeof fetch
+    window.fetch = baselineFetch
+    Object.defineProperty(window, registrySymbol, {
+      configurable: true,
+      value: externalRegistry
+    })
+    const instance = createInterceptor({
+      policy: {},
+      attribution: createStaticAttribution(true),
+      confirm: vi.fn(async () => true),
+      channels: ['fetch', 'form']
+    })
+    let unexpectedUninstall: (() => void) | undefined
+
+    try {
+      expect(() => { unexpectedUninstall = instance.install() })
+        .toThrow('Incompatible form interceptor registry')
+      expect(instance.installed).toBe(false)
+      expect(window.fetch).toBe(baselineFetch)
+      expect(registryHost[registrySymbol]).toBe(externalRegistry)
+    } finally {
+      unexpectedUninstall?.()
+      window.fetch = previousFetch
+      if (previousDescriptor) {
+        Object.defineProperty(window, registrySymbol, previousDescriptor)
+      } else {
+        delete registryHost[registrySymbol]
+      }
+    }
+  })
+})

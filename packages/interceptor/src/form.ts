@@ -97,8 +97,17 @@ export function patchForm(
     }).catch(() => undefined)
   } as typeof previous, 'form-submit', lifecycle, previous)
 
-  prototype.submit = patchedSubmit
-  view.addEventListener('submit', listener)
+  try {
+    prototype.submit = patchedSubmit
+    view.addEventListener('submit', listener)
+  } catch (error) {
+    lifecycle.active = false
+    view.removeEventListener('submit', listener)
+    if (prototype.submit === patchedSubmit) {
+      prototype.submit = skipInactivePatches(previous, 'form-submit')
+    }
+    throw error
+  }
 
   return () => {
     lifecycle.active = false
@@ -112,7 +121,12 @@ export function patchForm(
 function getOrCreateRegistry(view: Window & typeof globalThis): FormRegistry {
   const target = view as Window & typeof globalThis & Record<PropertyKey, unknown>
   const existing = target[FORM_REGISTRY]
-  if (existing !== undefined) return existing as FormRegistry
+  if (existing !== undefined) {
+    if (!isFormRegistry(existing)) {
+      throw new TypeError('Incompatible form interceptor registry.')
+    }
+    return existing
+  }
   const registry: FormRegistry = {
     source: FORM_REGISTRY_SOURCE,
     eventContexts: new WeakMap(),
@@ -123,6 +137,14 @@ function getOrCreateRegistry(view: Window & typeof globalThis): FormRegistry {
     value: registry
   })
   return registry
+}
+
+function isFormRegistry(value: unknown): value is FormRegistry {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<FormRegistry>
+  return candidate.source === FORM_REGISTRY_SOURCE &&
+    candidate.eventContexts instanceof WeakMap &&
+    candidate.replayingForms instanceof WeakSet
 }
 
 function handleSubmitEvent(
