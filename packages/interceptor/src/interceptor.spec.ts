@@ -123,6 +123,24 @@ describe('fetch —— 确认路径', () => {
     expect(confirm.mock.calls[0][0].risk).toBe('destructive')
   })
 
+  it('相对 URL 先绝对化再匹配完整地址的危险 GET', async () => {
+    const confirm = vi.fn(async () => false)
+    setup({ confirm }, {
+      danger: [{
+        id: 'export-all',
+        match: { method: 'GET', url: `${location.origin}/api/export-all` }
+      }]
+    })
+
+    await expect(fetch('/api/export-all')).rejects.toBeInstanceOf(RequestDeniedError)
+
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      risk: 'destructive',
+      request: expect.objectContaining({ url: `${location.origin}/api/export-all` })
+    }))
+    expect(sent).toHaveLength(0)
+  })
+
   it('已授权窗口内不重复确认——路径 A 已经问过人了', async () => {
     const scope = { begin: vi.fn(), end: vi.fn(), isAuthorized: () => true }
     const { confirm } = setup({ authorization: scope })

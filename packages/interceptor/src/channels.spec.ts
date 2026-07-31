@@ -92,6 +92,24 @@ describe('XMLHttpRequest', () => {
     expect(sent).toEqual([{ channel: 'xhr', method: 'GET', url: '/api/users' }])
   })
 
+  it('相对 URL 先绝对化再匹配完整地址的危险 GET', async () => {
+    const confirm = vi.fn(async () => false)
+    setup({ confirm }, {
+      danger: [{
+        id: 'export-all',
+        match: { method: 'GET', url: `${location.origin}/api/export-all` }
+      }]
+    })
+
+    await xhr('GET', '/api/export-all')
+
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
+      risk: 'destructive',
+      request: expect.objectContaining({ url: `${location.origin}/api/export-all` })
+    }))
+    expect(sent).toHaveLength(0)
+  })
+
   it('写请求要确认，批准后才发出', async () => {
     const { confirm } = setup()
 
@@ -117,7 +135,7 @@ describe('XMLHttpRequest', () => {
 
     expect(confirm.mock.calls[0][0].request).toMatchObject({
       method: 'DELETE',
-      url: '/api/users/u_1',
+      url: `${location.origin}/api/users/u_1`,
       body: 'old-body'
     })
 
@@ -132,7 +150,7 @@ describe('XMLHttpRequest', () => {
 
     expect(confirm.mock.calls[1][0].request).toMatchObject({
       method: 'POST',
-      url: '/api/transfers',
+      url: `${location.origin}/api/transfers`,
       body: 'new-body'
     })
     expect(sent).toEqual([{ channel: 'xhr', method: 'POST', url: '/api/transfers' }])
@@ -425,6 +443,20 @@ describe('navigator.sendBeacon', () => {
     expect(sent).toHaveLength(1)
   })
 
+  it('相对 URL 先绝对化再匹配完整地址的放行规则', () => {
+    setup({}, {
+      allow: [{
+        id: 'metrics',
+        match: { method: 'POST', url: `${location.origin}/api/metrics` }
+      }]
+    })
+
+    const accepted = navigator.sendBeacon('/api/metrics', '{}')
+
+    expect(accepted).toBe(true)
+    expect(sent).toEqual([{ channel: 'beacon', method: 'POST', url: '/api/metrics' }])
+  })
+
   it('需要确认时拒发并返回 false——无法挂起，只能二选一', () => {
     // beacon 设计上发生在 unload 期，同步返回 boolean，等不了异步确认。
     // 放行等于让一个该确认的写操作直接溜出去，因此默认拒发。
@@ -447,7 +479,7 @@ describe('navigator.sendBeacon', () => {
     expect(onUnholdable.mock.calls[0][0]).toMatchObject({
       channel: 'beacon',
       method: 'POST',
-      url: '/api/track'
+      url: `${location.origin}/api/track`
     })
   })
 

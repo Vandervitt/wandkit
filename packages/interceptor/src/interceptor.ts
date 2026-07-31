@@ -265,7 +265,7 @@ function patchFetch(
     ...args: Parameters<typeof fetch>
   ) {
     if (!lifecycle.active) return original.apply(this, args)
-    const request = await toInterceptedRequest(args, nextId())
+    const request = await toInterceptedRequest(view, args, nextId())
     if (!(await gate(request))) throw new RequestDeniedError(request)
     return original.apply(this, args)
   } as typeof fetch
@@ -317,7 +317,10 @@ function patchXhr(
       return (originalOpen as (...args: unknown[]) => void)
         .apply(this, [method, url, ...rest])
     }
-    callState.set(this, { method: method.toUpperCase(), url: String(url) })
+    callState.set(this, {
+      method: method.toUpperCase(),
+      url: resolveRequestUrl(view, url)
+    })
     return (originalOpen as (...args: unknown[]) => void)
       .apply(this, [method, url, ...rest])
   } as typeof XMLHttpRequest.prototype.open
@@ -394,7 +397,7 @@ function patchBeacon(
       id: nextId(),
       // beacon 恒为 POST，规范如此。
       method: 'POST',
-      url: String(url),
+      url: resolveRequestUrl(view, url),
       headers: {},
       body: parseBody(data),
       channel: 'beacon',
@@ -421,12 +424,13 @@ function patchBeacon(
 
 /** 从 `fetch` 的参数里提取判定所需的信息。 */
 async function toInterceptedRequest(
+  view: Window & typeof globalThis,
   args: Parameters<typeof fetch>,
   id: string
 ): Promise<InterceptedRequest> {
   const [input, init] = args
   const request = isRequestLike(input) ? input : undefined
-  const url = request?.url ?? String(input)
+  const url = resolveRequestUrl(view, request?.url ?? String(input))
   const method = (init?.method ?? request?.method ?? 'GET').toUpperCase()
   const headers = normalizeHeaders(init?.headers ?? request?.headers)
   const body = init?.body !== undefined && init.body !== null
@@ -442,6 +446,18 @@ async function toInterceptedRequest(
     channel: 'fetch',
     timestamp: Date.now()
   }
+}
+
+/**
+ * 浏览器网络 API 会基于当前文档解析相对 URL；策略快照必须看到同一个绝对地址。
+ *
+ * 只规范化纯数据快照，原始参数仍原样传给底层 API，避免改变宿主网络调用的形态。
+ */
+function resolveRequestUrl(
+  view: Window & typeof globalThis,
+  value: string | URL
+): string {
+  return new view.URL(String(value), view.document.baseURI).href
 }
 
 /** Request 会跨 iframe / window 流转，不能依赖当前 realm 的构造器。 */
