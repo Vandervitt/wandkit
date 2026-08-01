@@ -795,7 +795,7 @@ Expected: 全仓测试、所有 workspace 类型检查和构建通过，diff 无
 `test-results.md` 记录每一轮 RED/GREEN 的命令、退出码和失败原因；`review.md` 用表格记录
 设计覆盖、公开契约、安全边界、性能和改动范围。
 
-- [ ] **Step 5: 提交交付文档**
+- [x] **Step 5: 提交交付文档**
 
 ```bash
 test "$(git branch --show-current)" = "feat_20260801_ShadowDOM元素捕获"
@@ -803,7 +803,7 @@ git add docs/feat_20260801_ShadowDOM元素捕获
 git commit -m "feat: 记录 Shadow DOM 捕获验证结果"
 ```
 
-- [ ] **Step 6: 首次推送并创建独立 PR**
+- [x] **Step 6: 首次推送并创建独立 PR**
 
 首次推送严格使用：
 
@@ -823,7 +823,9 @@ PR 只包含 composed tree、executor 集成、测试与本分支文档，不删
 ## 执行结果
 
 - 实现提交：`b412310`、`61c0951`、`2944447`。
+- 交付文档提交：`a5f4afa`。
 - executor 最终验证：12 个测试文件、196/196 测试通过。
 - 全仓最终验证：48 个测试文件、727/727 测试通过；类型检查和构建通过。
+- 独立 PR：[Vandervitt/wandkit#7](https://github.com/Vandervitt/wandkit/pull/7)。
 - 详细红绿记录见 [test-results.md](test-results.md)。
 - 完整复审结论见 [review.md](review.md)。
