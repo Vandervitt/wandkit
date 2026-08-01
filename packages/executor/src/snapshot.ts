@@ -1,3 +1,13 @@
+import {
+  closestComposed,
+  composedChildNodes,
+  composedContains,
+  composedElements,
+  composedParent,
+  composedTextContent,
+  treeScope
+} from './composedTree'
+
 /**
  * 页面快照：把当前 DOM 压成模型读得懂的、带索引的可交互元素清单。
  *
@@ -271,9 +281,7 @@ export function capturePageWithElements(
   const detectCursor = options.detectClickableCursor !== false
   const expansion = options.viewportExpansion ?? DEFAULT_VIEWPORT_EXPANSION
   const detectOcclusion = options.detectOcclusion !== false
-  const candidates = detectCursor
-    ? root.querySelectorAll('*')
-    : root.querySelectorAll(CANDIDATE_SELECTOR)
+  const candidates = composedElements(root)
 
   const doc = ownerDocumentOf(root)
   const cache = new MeasureCache(doc?.defaultView ?? null)
@@ -379,36 +387,37 @@ export function capturePageWithElements(
     return true
   }
 
-  candidates.forEach(element => {
-    if (!isVisible(element, cache, layout)) return
+  for (const element of candidates) {
+    if (!detectCursor && !element.matches(CANDIDATE_SELECTOR)) continue
+    if (!isVisible(element, cache, layout)) continue
     // 层级：文档序遍历下，栈里留着的都是当前元素的祖先。逐个弹出不再包含它的，
     // 剩余深度即为它在「被收录元素」这棵树里的层级。
     //
     // 必须在收录判定**之前**做：正文也要按这个深度缩进，放在 capture 内部的话，
     // 未被收录的元素拿到的是上一个分支残留的深度。
     while (ancestors.length > 0 &&
-      !ancestors[ancestors.length - 1].element.contains(element)) {
+      !composedContains(ancestors[ancestors.length - 1].element, element)) {
       ancestors.pop()
     }
-    if (capture(element)) return
+    if (capture(element)) continue
     // 未被收录的元素——容器、标题、单元格——它们的直接文本就是页面正文。
     // 只取直接文本：取 textContent 会让每一层祖先都重复一遍整段内容。
     const own = collapse(directText(element))
-    if (!own) return
+    if (!own) continue
     // 已经被某个祖先当成可访问名用掉的文本不再重复收录。
-    if (ancestors.some(ancestor => ancestor.name.includes(own))) return
+    if (ancestors.some(ancestor => ancestor.name.includes(own))) continue
     // 同理，`<label>` 里的文字就是那个控件的可访问名，已经跟在控件那一行了。
     // 这里查不到它是因为 label 自己也被丢弃了，压根没进祖先栈。
-    if (isLabelDecoration(element, false)) return
+    if (isLabelDecoration(element, false)) continue
     // 这段文字属于某个「本该可交互、却被过滤掉」的元素时，一律不输出。
     //
     // 输出了反而更糟：模型看到「话单查询」四个字，以为那里能点，却在清单里找不到
     // 对应索引，于是去猜一个邻近的下标——真实后台实测，它因此点了「数据报表」。
     // 宁可让这一项对模型完全不存在，也不能给出一个够不到的承诺。
-    if (hasFilteredInteractiveAncestor(element, detectCursor, cache)) return
-    if (layout && !isInViewport(element, expansion, cache)) return
+    if (hasFilteredInteractiveAncestor(element, detectCursor, cache)) continue
+    if (layout && !isInViewport(element, expansion, cache)) continue
     texts.push({ text: own, depth: ancestors.length, after: snapshotElements.length - 1 })
-  })
+  }
 
   return {
     snapshot: {
@@ -509,7 +518,8 @@ function isTopElement(element: Element, cache: MeasureCache): boolean {
   return points.some(([x, y]) => {
     // 先试单点：绝大多数元素本来就在栈顶，这条几乎总是命中，代价也最低。
     const hit = fromPoint(x, y)
-    if (hit && (hit === element || element.contains(hit) || hit.contains(element))) {
+    if (hit && (hit === element || composedContains(element, hit) ||
+      composedContains(hit, element))) {
       return true
     }
     if (!fromPoints) return false
@@ -523,7 +533,8 @@ function isTopElement(element: Element, cache: MeasureCache): boolean {
     // 误伤同位置重叠。放在单点之后是因为它明显更贵——真实页面实测，无条件调用会把
     // 整体耗时从 21ms 拉到 167ms。
     return fromPoints(x, y).some(stacked =>
-      stacked === element || element.contains(stacked) || stacked.contains(element))
+      stacked === element || composedContains(element, stacked) ||
+        composedContains(stacked, element))
   })
 }
 
@@ -651,10 +662,10 @@ function roleOf(
  */
 function hasOwnEventHandler(element: Element): boolean {
   if (!EVENT_ATTRIBUTES.some(attribute => element.hasAttribute(attribute))) return false
-  let ancestor = element.parentElement
+  let ancestor = composedParent(element)
   while (ancestor) {
     if (EVENT_ATTRIBUTES.some(attribute => ancestor?.hasAttribute(attribute))) return false
-    ancestor = ancestor.parentElement
+    ancestor = composedParent(ancestor)
   }
   return true
 }
@@ -715,11 +726,19 @@ function isCursorClickable(element: Element, cache: MeasureCache): boolean {
   //    这里刻意只认叶子而不认 `[role]` / `[tabindex]` 容器：组件库大量把 `role` 挂在
   //    包装元素上（Element UI 的 `<li role="menuitem">` 里再放一个可点的标题 div），
   //    若把容器也算进来，真正可点的标题会被连带拒绝，整个菜单项就消失了。
-  if (element.parentElement?.closest(SEMANTIC_LEAF_SELECTOR)) return false
+  let ancestor = composedParent(element)
+  while (ancestor) {
+    if (ancestor.matches(SEMANTIC_LEAF_SELECTOR)) return false
+    ancestor = composedParent(ancestor)
+  }
   // 2. 内部含语义可交互元素——本元素只是容器，真正该点的是里面那个。
-  if (element.querySelector(CANDIDATE_SELECTOR)) return false
+  for (const child of composedElements(element)) {
+    if (child.matches(CANDIDATE_SELECTOR)) return false
+  }
   // 3. 还有更内层的可点元素——取最内层，它对应的点击目标更精确。
-  return !Array.from(element.children).some(child => {
+  return !composedChildNodes(element).some(node => {
+    if (node.nodeType !== 1) return false
+    const child = node as Element
     const childCursor = cache.style(child)?.cursor
     return childCursor !== undefined && INTERACTIVE_CURSORS.has(childCursor)
   })
@@ -743,7 +762,10 @@ export function accessibleName(element: Element, cache?: MeasureCache): string {
   const labelledBy = element.getAttribute('aria-labelledby')
   if (labelledBy) {
     const text = labelledBy.split(/\s+/)
-      .map(id => element.ownerDocument.getElementById(id)?.textContent ?? '')
+      .map(id => {
+        const labelled = elementByIdInScope(element, id)
+        return labelled ? composedTextContent(labelled) : ''
+      })
       .join(' ')
     if (text.trim()) return collapse(text)
   }
@@ -772,7 +794,7 @@ export function accessibleName(element: Element, cache?: MeasureCache): string {
   // 又白烧 token。真正该点的是里面各自带直接文本的菜单标题。
   const text = hasInteractiveDescendant(element, cache)
     ? directText(element)
-    : element.textContent
+    : composedTextContent(element)
   if (text?.trim()) return collapse(text)
 
   const placeholder = element.getAttribute('placeholder')
@@ -798,8 +820,11 @@ function labelText(element: Element): string {
   const id = element.getAttribute('id')
   if (id) {
     const escaped = cssEscape(id)
-    const explicit = element.ownerDocument.querySelector(`label[for="${escaped}"]`)
-    if (explicit?.textContent?.trim()) return collapse(explicit.textContent)
+    const explicit = queryInScope(element, `label[for="${escaped}"]`)
+    if (explicit) {
+      const text = composedTextContent(explicit)
+      if (text.trim()) return collapse(text)
+    }
   }
   const wrapping = element.closest('label')
   if (!wrapping) return ''
@@ -807,6 +832,17 @@ function labelText(element: Element): string {
   const clone = wrapping.cloneNode(true) as HTMLElement
   clone.querySelectorAll('input,select,textarea,button').forEach(node => node.remove())
   return clone.textContent?.trim() ? collapse(clone.textContent) : ''
+}
+
+function elementByIdInScope(element: Element, id: string): Element | null {
+  const scope = treeScope(element)
+  return scope.nodeType === 9
+    ? (scope as Document).getElementById(id)
+    : (scope as ShadowRoot).getElementById(id)
+}
+
+function queryInScope(element: Element, selector: string): Element | null {
+  return treeScope(element).querySelector(selector)
 }
 
 function cssEscape(value: string): string {
@@ -887,8 +923,8 @@ function isVisible(
   cache: MeasureCache,
   layout: boolean
 ): boolean {
-  if (element.closest('[hidden]')) return false
-  if (element.closest('[aria-hidden="true"]')) return false
+  if (closestComposed(element, '[hidden]')) return false
+  if (closestComposed(element, '[aria-hidden="true"]')) return false
 
   const style = cache.style(element)
   if (!style) return true
@@ -904,13 +940,13 @@ function isVisible(
   }
 
   // 无布局引擎（jsdom / SSR）：退回沿祖先链检查样式。
-  let current: Element | null = element.parentElement
+  let current: Element | null = composedParent(element)
   while (current) {
     const parentStyle = cache.style(current)
     if (parentStyle?.display === 'none' || parentStyle?.visibility === 'hidden') {
       return false
     }
-    current = current.parentElement
+    current = composedParent(current)
   }
   return true
 }
@@ -945,7 +981,8 @@ const MAX_CONTEXT_LENGTH = 60
  * 只取最近的一层行容器，且长度超限即放弃：取到整块区域的文本反而会淹没有效信息。
  */
 function rowContext(element: Element, name: string): string | undefined {
-  const row = element.parentElement?.closest(ROW_CONTAINER_SELECTOR)
+  const parent = composedParent(element)
+  const row = parent ? closestComposed(parent, ROW_CONTAINER_SELECTOR) : null
   if (!row) return undefined
 
   // 表格行取**首格**，而不是整行文本。
@@ -957,16 +994,23 @@ function rowContext(element: Element, name: string): string | undefined {
   // 这条路径也不要求「叶子行」——真实操作列常带「更多」下拉，其浮层里是 `<li>`，
   // 会让整行不再是叶子，但首格依然有效。
   if (row.matches(TABLE_ROW_SELECTOR)) {
-    const cell = row.querySelector(TABLE_CELL_SELECTOR)
-    const text = collapse(cell?.textContent ?? '')
+    let cell: Element | undefined
+    for (const descendant of composedElements(row)) {
+      if (!descendant.matches(TABLE_CELL_SELECTOR)) continue
+      cell = descendant
+      break
+    }
+    const text = collapse(cell ? composedTextContent(cell) : '')
     if (!text || text === name) return undefined
     return text.slice(0, MAX_CONTEXT_LENGTH)
   }
 
   // 列表项没有「单元格」概念，只能取整体文本，因此必须是**叶子**且不超长：
   // Element UI 侧边栏的 `<li>` 包着整个子菜单，取它的文本会得到一整段菜单名拼接。
-  if (row.querySelector(ROW_CONTAINER_SELECTOR)) return undefined
-  const text = collapse(row.textContent ?? '')
+  for (const descendant of composedElements(row)) {
+    if (descendant.matches(ROW_CONTAINER_SELECTOR)) return undefined
+  }
+  const text = collapse(composedTextContent(row))
   if (!text || text === name || text.length > MAX_CONTEXT_LENGTH) return undefined
   // 去掉元素自身的名字，剩下的才是「这一项是谁」。
   const withoutSelf = name ? collapse(text.split(name).join(' ')) : text
@@ -1003,17 +1047,18 @@ function hasInteractiveDescendant(element: Element, cache?: MeasureCache): boole
   // 语义叶子永远是「目标」而非「容器」：`<button>` 里的 `<span>`、`<i>` 只是装饰，
   // 它的名字理应取整段文本。不豁免的话按钮会因为内部有可点子元素而被整个跳过。
   if (element.matches(SEMANTIC_LEAF_SELECTOR)) return false
-  if (element.querySelector(CANDIDATE_SELECTOR)) return true
-  if (!cache) return false
-  return Array.from(element.querySelectorAll('*')).some(child => {
+  for (const child of composedElements(element)) {
+    if (child.matches(CANDIDATE_SELECTOR)) return true
+    if (!cache) continue
     const childCursor = cache.style(child)?.cursor
-    return childCursor !== undefined && INTERACTIVE_CURSORS.has(childCursor)
-  })
+    if (childCursor !== undefined && INTERACTIVE_CURSORS.has(childCursor)) return true
+  }
+  return false
 }
 
 /** 只取元素自己的直接文本子节点，不含任何后代的文本。 */
 function directText(element: Element): string {
-  return Array.from(element.childNodes)
+  return composedChildNodes(element)
     .filter(node => node.nodeType === 3)
     .map(node => node.textContent ?? '')
     .join('')
@@ -1036,11 +1081,11 @@ function hasFilteredInteractiveAncestor(
   detectCursor: boolean,
   cache: MeasureCache
 ): boolean {
-  let current: Element | null = element.parentElement
+  let current: Element | null = composedParent(element)
   for (let depth = 0; depth < 3 && current; depth += 1) {
     const role = roleOf(current, detectCursor, cache)
     if (role && INTERACTIVE_ROLES.has(role)) return true
-    current = current.parentElement
+    current = composedParent(current)
   }
   return false
 }

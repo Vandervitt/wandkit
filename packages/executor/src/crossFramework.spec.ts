@@ -104,13 +104,7 @@ describe('Ant Design 式标记（React 栈）', () => {
 })
 
 describe('Shadow DOM（Web Components / Lit / Stencil）', () => {
-  /**
-   * Shadow DOM 会隔断 `querySelectorAll('*')`，因此必须显式穿透。
-   *
-   * 这是 P2 的既定范围，此处先把行为钉住：**当前不穿透**。写成测试而非留空，是为了
-   * 让实现 P2 时有一条会由红转绿的用例，而不是靠记忆。
-   */
-  it('影子树内的元素当前不被收录（P2 待实现）', () => {
+  it('默认穿透 open Shadow Root 并收录内部元素', () => {
     render('<div id="host"></div>')
     const host = document.getElementById('host') as HTMLElement
     const shadow = host.attachShadow({ mode: 'open' })
@@ -118,19 +112,19 @@ describe('Shadow DOM（Web Components / Lit / Stencil）', () => {
     button.textContent = '影子按钮'
     shadow.appendChild(button)
 
-    expect(capturePage().elements.map(e => e.name)).not.toContain('影子按钮')
+    expect(capturePage().elements.map(element => element.name)).toContain('影子按钮')
   })
 
-  it('穿透后可收录——传入 shadowRoot 即可，算法本身无需改动', () => {
-    render('<div id="host2"></div>')
-    const host = document.getElementById('host2') as HTMLElement
-    const shadow = host.attachShadow({ mode: 'open' })
+  it('closed Shadow Root 保持不可见', () => {
+    render('<div id="closed-host"></div>')
+    const host = document.getElementById('closed-host') as HTMLElement
+    const shadow = host.attachShadow({ mode: 'closed' })
     const button = document.createElement('button')
-    button.textContent = '影子按钮'
+    button.textContent = '关闭影子按钮'
     shadow.appendChild(button)
 
-    // 说明穿透只是「遍历范围」问题，判定逻辑对影子树同样成立。
-    expect(capturePage(shadow).elements.map(e => e.name)).toEqual(['影子按钮'])
+    expect(capturePage().elements.map(element => element.name))
+      .not.toContain('关闭影子按钮')
   })
 })
 
