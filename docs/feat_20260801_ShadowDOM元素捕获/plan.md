@@ -16,7 +16,7 @@
 - Create: `packages/executor/src/composedTree.ts`
 - Create: `packages/executor/src/composedTree.spec.ts`
 
-- [ ] **Step 1: 写普通 DOM、open/nested Shadow Root 的失败测试**
+- [x] **Step 1: 写普通 DOM、open/nested Shadow Root 的失败测试**
 
 创建 `packages/executor/src/composedTree.spec.ts`，先导入尚不存在的模块：
 
@@ -73,7 +73,7 @@ describe('composedElements', () => {
 })
 ```
 
-- [ ] **Step 2: 写 slot 分发、fallback、纯文本和 closed Root 的失败测试**
+- [x] **Step 2: 写 slot 分发、fallback、纯文本和 closed Root 的失败测试**
 
 在同一文件补充：
 
@@ -146,7 +146,7 @@ describe('slot composed children', () => {
 })
 ```
 
-- [ ] **Step 3: 写跨边界祖先、Tree Scope 与异常降级失败测试**
+- [x] **Step 3: 写跨边界祖先、Tree Scope 与异常降级失败测试**
 
 ```ts
 describe('composed ancestry and scope', () => {
@@ -188,7 +188,7 @@ describe('composed ancestry and scope', () => {
 })
 ```
 
-- [ ] **Step 4: 运行测试并确认 RED**
+- [x] **Step 4: 运行测试并确认 RED**
 
 Run:
 
@@ -198,7 +198,7 @@ npx vitest run packages/executor/src/composedTree.spec.ts
 
 Expected: FAIL，原因是 `./composedTree` 模块尚不存在；不能是测试语法或 jsdom 初始化错误。
 
-- [ ] **Step 5: 实现 composed child nodes 与遍历**
+- [x] **Step 5: 实现 composed child nodes 与遍历**
 
 创建 `packages/executor/src/composedTree.ts`：
 
@@ -275,7 +275,7 @@ export function composedTextContent(root: ParentNode): string {
 }
 ```
 
-- [ ] **Step 6: 实现 composed 祖先与 Tree Scope**
+- [x] **Step 6: 实现 composed 祖先与 Tree Scope**
 
 在同一文件追加：
 
@@ -316,7 +316,7 @@ export function treeScope(element: Element): Document | ShadowRoot {
 }
 ```
 
-- [ ] **Step 7: 运行 composed tree 测试并确认 GREEN**
+- [x] **Step 7: 运行 composed tree 测试并确认 GREEN**
 
 Run:
 
@@ -326,7 +326,7 @@ npx vitest run packages/executor/src/composedTree.spec.ts
 
 Expected: PASS，所有遍历、slot、文本、closed Root、祖先和降级用例通过。
 
-- [ ] **Step 8: 提交基础模块**
+- [x] **Step 8: 提交基础模块**
 
 提交前重新检查分支并暂存明确文件：
 
@@ -343,7 +343,7 @@ git commit -m "feat: 新增 composed tree 遍历"
 - Modify: `packages/executor/src/snapshot.spec.ts`
 - Modify: `packages/executor/src/crossFramework.spec.ts`
 
-- [ ] **Step 1: 将既有 P2 用例改成 open Root 正向红测，并增加 closed Root 边界**
+- [x] **Step 1: 将既有 P2 用例改成 open Root 正向红测，并增加 closed Root 边界**
 
 在 `packages/executor/src/crossFramework.spec.ts` 修改 Shadow DOM 分组：
 
@@ -372,7 +372,7 @@ it('closed Shadow Root 保持不可见', () => {
 })
 ```
 
-- [ ] **Step 2: 写混排顺序、连续索引、层级和 slot 文本红测**
+- [x] **Step 2: 写混排顺序、连续索引、层级和 slot 文本红测**
 
 在 `packages/executor/src/snapshot.spec.ts` 增加：
 
@@ -424,7 +424,7 @@ describe('capturePage —— composed tree', () => {
 })
 ```
 
-- [ ] **Step 3: 写隐藏 Host、Shadow Tree Scope 名称与语义筛选红测**
+- [x] **Step 3: 写隐藏 Host、Shadow Tree Scope 名称与语义筛选红测**
 
 ```ts
 it('隐藏 Host 会隐藏 open Shadow Root 内部元素', () => {
@@ -465,7 +465,7 @@ it('关闭 cursor 推断时仍穿透影子树收录语义控件', () => {
 })
 ```
 
-- [ ] **Step 4: 运行目标测试并确认 RED**
+- [x] **Step 4: 运行目标测试并确认 RED**
 
 Run:
 
@@ -475,7 +475,7 @@ npx vitest run packages/executor/src/snapshot.spec.ts packages/executor/src/cros
 
 Expected: 新增 open Shadow DOM、顺序、slot 文本、隐藏 Host 和 Tree Scope 用例失败；closed Root 用例可以已通过。
 
-- [ ] **Step 5: 接入 composed tree 遍历与层级**
+- [x] **Step 5: 接入 composed tree 遍历与层级**
 
 在 `packages/executor/src/snapshot.ts` 导入：
 
@@ -510,7 +510,7 @@ for (const element of candidates) {
 
 不要分两次生成快照与真实元素列表；两者仍在同一遍历中同步追加。
 
-- [ ] **Step 6: 接入 composed text 与 Tree Scope 名称解析**
+- [x] **Step 6: 接入 composed text 与 Tree Scope 名称解析**
 
 把直接文本函数改为：
 
@@ -541,7 +541,7 @@ function queryInScope(element: Element, selector: string): Element | null {
 
 行上下文中读取行和首格文本时改用 `composedTextContent()`。
 
-- [ ] **Step 7: 把祖先与后代过滤切换到 composed 语义**
+- [x] **Step 7: 把祖先与后代过滤切换到 composed 语义**
 
 逐项替换：
 
@@ -557,7 +557,7 @@ function queryInScope(element: Element, selector: string): Element | null {
 
 保留 `isLabelDecoration()` 的原生 `closest('label')`，避免跨 Tree Scope 错建 label 关系。
 
-- [ ] **Step 8: 运行快照测试并确认 GREEN**
+- [x] **Step 8: 运行快照测试并确认 GREEN**
 
 Run:
 
@@ -567,7 +567,7 @@ npx vitest run packages/executor/src/composedTree.spec.ts packages/executor/src/
 
 Expected: 三个测试文件全部通过，既有普通 DOM 用例不回归。
 
-- [ ] **Step 9: 提交快照集成**
+- [x] **Step 9: 提交快照集成**
 
 ```bash
 test "$(git branch --show-current)" = "feat_20260801_ShadowDOM元素捕获"
@@ -581,7 +581,7 @@ git commit -m "feat: 页面快照穿透 open Shadow DOM"
 - Modify: `packages/executor/src/controller.ts`
 - Modify: `packages/executor/src/controller.spec.ts`
 
-- [ ] **Step 1: 写点击、输入、选择和索引失效红测**
+- [x] **Step 1: 写点击、输入、选择和索引失效红测**
 
 在 `packages/executor/src/controller.spec.ts` 增加：
 
@@ -644,7 +644,7 @@ describe('PageController —— Shadow DOM 动作', () => {
 })
 ```
 
-- [ ] **Step 2: 写影子树校验错误与最大滚动容器红测**
+- [x] **Step 2: 写影子树校验错误与最大滚动容器红测**
 
 在测试文件现有的“滚动” `describe` 内复用 `makeScrollable` 夹具，增加滚动用例；
 表单校验用例仍放在现有表单校验分组：
@@ -677,7 +677,7 @@ it('页面不可滚时回退到影子树内最大的滚动容器', () => {
 })
 ```
 
-- [ ] **Step 3: 运行控制器测试并确认 RED**
+- [x] **Step 3: 运行控制器测试并确认 RED**
 
 Run:
 
@@ -687,7 +687,7 @@ npx vitest run packages/executor/src/controller.spec.ts
 
 Expected: 基础点击、输入和选择可能已因快照集成通过；校验错误和最大滚动容器用例应失败，证明整页辅助扫描仍只看 Document Tree。
 
-- [ ] **Step 4: 控制器整页扫描复用 composedElements**
+- [x] **Step 4: 控制器整页扫描复用 composedElements**
 
 在 `packages/executor/src/controller.ts` 导入：
 
@@ -720,7 +720,7 @@ for (const node of composedElements(view.document)) {
 }
 ```
 
-- [ ] **Step 5: 补齐复合下拉的跨边界关系**
+- [x] **Step 5: 补齐复合下拉的跨边界关系**
 
 在 `selectFromPopup()` 中把：
 
@@ -737,7 +737,7 @@ for (const node of composedElements(view.document)) {
 `isExpanded()` 的祖先路径使用 `closestComposed(trigger, '[aria-expanded="true"]')`，后代路径
 使用 `composedElements(trigger)` 查找 `aria-expanded="true"`。
 
-- [ ] **Step 6: 运行控制器和 executor 测试并确认 GREEN**
+- [x] **Step 6: 运行控制器和 executor 测试并确认 GREEN**
 
 Run:
 
@@ -747,7 +747,7 @@ npx vitest run packages/executor/src/controller.spec.ts packages/executor/src/to
 
 Expected: 所有目标测试通过；既有复合下拉、表单校验和滚动行为不回归。
 
-- [ ] **Step 7: 提交控制器集成**
+- [x] **Step 7: 提交控制器集成**
 
 ```bash
 test "$(git branch --show-current)" = "feat_20260801_ShadowDOM元素捕获"
@@ -762,7 +762,7 @@ git commit -m "feat: 页面控制器支持 Shadow DOM 元素"
 - Create: `docs/feat_20260801_ShadowDOM元素捕获/test-results.md`
 - Create: `docs/feat_20260801_ShadowDOM元素捕获/review.md`
 
-- [ ] **Step 1: 运行 executor 全包测试**
+- [x] **Step 1: 运行 executor 全包测试**
 
 ```bash
 npx vitest run packages/executor/src
@@ -770,7 +770,7 @@ npx vitest run packages/executor/src
 
 Expected: executor 全部测试通过。
 
-- [ ] **Step 2: 运行全仓验证**
+- [x] **Step 2: 运行全仓验证**
 
 ```bash
 npm run verify
@@ -779,7 +779,7 @@ git diff --check
 
 Expected: 全仓测试、所有 workspace 类型检查和构建通过，diff 无空白错误。
 
-- [ ] **Step 3: 复审完整 diff**
+- [x] **Step 3: 复审完整 diff**
 
 核对：
 
@@ -790,7 +790,7 @@ Expected: 全仓测试、所有 workspace 类型检查和构建通过，diff 无
 - 密码、token、验证码等值仍走既有脱敏逻辑。
 - 普通 DOM 顺序、层级、遮挡、下拉和滚动测试无回归。
 
-- [ ] **Step 4: 记录红绿、测试和评审结果**
+- [x] **Step 4: 记录红绿、测试和评审结果**
 
 `test-results.md` 记录每一轮 RED/GREEN 的命令、退出码和失败原因；`review.md` 用表格记录
 设计覆盖、公开契约、安全边界、性能和改动范围。
@@ -819,3 +819,11 @@ feat: 支持 Shadow DOM 元素捕获
 ```
 
 PR 只包含 composed tree、executor 集成、测试与本分支文档，不删除本地或远端分支。
+
+## 执行结果
+
+- 实现提交：`b412310`、`61c0951`、`2944447`。
+- executor 最终验证：12 个测试文件、196/196 测试通过。
+- 全仓最终验证：48 个测试文件、727/727 测试通过；类型检查和构建通过。
+- 详细红绿记录见 [test-results.md](test-results.md)。
+- 完整复审结论见 [review.md](review.md)。
