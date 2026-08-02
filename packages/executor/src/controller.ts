@@ -7,6 +7,12 @@ import {
   type PageSnapshot
 } from './snapshot'
 import {
+  closestComposed,
+  composedContains,
+  composedElements,
+  composedTextContent
+} from './composedTree'
+import {
   waitForDomStable,
   watchRouteChanges,
   type RouteWatcher,
@@ -137,9 +143,10 @@ export class PageController {
    */
   validationErrors(): string[] {
     if (typeof document === 'undefined') return []
-    return Array.from(document.querySelectorAll('[role="alert"]'))
-      .filter(alert => alert.closest('form') && isElementVisible(alert))
-      .map(alert => collapseText(alert.textContent ?? ''))
+    return Array.from(composedElements(document))
+      .filter(element => element.matches('[role="alert"]'))
+      .filter(alert => closestComposed(alert, 'form') && isElementVisible(alert))
+      .map(alert => collapseText(composedTextContent(alert)))
       .filter(text => text !== '')
       // 同一条错误常被内外两层节点各渲染一遍（AntD 就是 explain / explain-error 两层）。
       .filter((text, index, all) => all.indexOf(text) === index)
@@ -240,7 +247,8 @@ export class PageController {
     const pool = snapshot.elements
       .map((meta, index) => ({ meta, dom: captured[index] }))
       // 触发器自身及其内部元素排除掉：点回触发器只会把刚打开的浮层收起来。
-      .filter(item => item.dom && item.dom !== trigger && !trigger.contains(item.dom))
+      .filter(item => item.dom && item.dom !== trigger &&
+        !composedContains(trigger, item.dom))
       .filter(item => item.meta.name)
 
     // 优先只在「新出现的」里找。页面别处很可能本来就有同名文字（表格里的角色列就是
@@ -325,16 +333,17 @@ export class PageController {
 
     let best: HTMLElement | undefined
     let bestArea = 0
-    view.document.querySelectorAll<HTMLElement>('*').forEach(node => {
-      if (node.scrollHeight <= node.clientHeight + 1) return
+    for (const node of composedElements(view.document)) {
+      if (!(node instanceof view.HTMLElement)) continue
+      if (node.scrollHeight <= node.clientHeight + 1) continue
       const overflowY = view.getComputedStyle(node).overflowY
-      if (overflowY !== 'auto' && overflowY !== 'scroll') return
+      if (overflowY !== 'auto' && overflowY !== 'scroll') continue
       const area = node.clientWidth * node.clientHeight
       if (area > bestArea) {
         bestArea = area
         best = node
       }
-    })
+    }
     return best
   }
 
@@ -413,9 +422,12 @@ function collapseText(raw: string): string {
  * 刚打开的浮层又点关掉。
  */
 function isExpanded(trigger: Element): boolean {
-  return trigger.getAttribute('aria-expanded') === 'true' ||
-    !!trigger.querySelector('[aria-expanded="true"]') ||
-    !!trigger.closest('[aria-expanded="true"]')
+  if (trigger.getAttribute('aria-expanded') === 'true') return true
+  if (closestComposed(trigger, '[aria-expanded="true"]')) return true
+  for (const descendant of composedElements(trigger)) {
+    if (descendant.getAttribute('aria-expanded') === 'true') return true
+  }
+  return false
 }
 
 /** 精确名字优先，包含兜底——反过来会让「坐席」抢先匹配到「坐席组长」。 */

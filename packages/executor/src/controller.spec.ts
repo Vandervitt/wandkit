@@ -52,6 +52,63 @@ describe('PageController —— 索引回指', () => {
   })
 })
 
+describe('PageController —— Shadow DOM 动作', () => {
+  it('按连续索引点击 open Shadow Root 内按钮', () => {
+    const host = document.createElement('div')
+    const root = host.attachShadow({ mode: 'open' })
+    const button = document.createElement('button')
+    button.textContent = '影子操作'
+    const clicked = vi.fn()
+    button.addEventListener('click', clicked)
+    root.append(button)
+    document.body.append(host)
+    const controller = new PageController()
+    const snapshot = controller.capture()
+
+    controller.click(snapshot.elements.findIndex(element => element.name === '影子操作'))
+
+    expect(clicked).toHaveBeenCalledTimes(1)
+  })
+
+  it('输入与原生选择操作影子树中的真实控件', async () => {
+    const host = document.createElement('div')
+    const root = host.attachShadow({ mode: 'open' })
+    root.innerHTML = `
+      <input aria-label="关键词">
+      <select aria-label="状态"><option value="on">启用</option></select>
+    `
+    document.body.append(host)
+    const input = root.querySelector('input') as HTMLInputElement
+    const select = root.querySelector('select') as HTMLSelectElement
+    const changed = vi.fn()
+    input.addEventListener('change', changed)
+    select.addEventListener('change', changed)
+    const controller = new PageController()
+    const snapshot = controller.capture()
+
+    controller.input(snapshot.elements.findIndex(element => element.name === '关键词'), '客户')
+    await controller.select(snapshot.elements.findIndex(element => element.name === '状态'), '启用')
+
+    expect(input.value).toBe('客户')
+    expect(select.value).toBe('on')
+    expect(changed).toHaveBeenCalledTimes(2)
+  })
+
+  it('Host 移除后影子树旧索引失效', () => {
+    const host = document.createElement('div')
+    const root = host.attachShadow({ mode: 'open' })
+    const button = document.createElement('button')
+    button.textContent = '即将移除'
+    root.append(button)
+    document.body.append(host)
+    const controller = new PageController()
+    controller.capture()
+    host.remove()
+
+    expect(() => controller.click(0)).toThrow(/已不在当前文档/)
+  })
+})
+
 describe('PageController —— 路由变化作废索引', () => {
   it('路由跳转后旧索引立即失效，报错点明原因', async () => {
     render('<button>A</button>')
@@ -312,6 +369,81 @@ describe('PageController —— 复合下拉（组件库）', () => {
     expect(picked).toEqual(['坐席'])
   })
 
+  it('Shadow Host 内部已展开时不重复点击触发器', async () => {
+    const picked = vi.fn()
+    const reopened = vi.fn()
+    const host = document.createElement('div')
+    host.setAttribute('role', 'combobox')
+    host.setAttribute('aria-label', '角色')
+    host.addEventListener('mousedown', reopened)
+    const root = host.attachShadow({ mode: 'open' })
+    const state = document.createElement('span')
+    state.setAttribute('aria-expanded', 'true')
+    root.append(state)
+    const option = document.createElement('button')
+    option.textContent = '坐席'
+    option.addEventListener('mousedown', picked)
+    document.body.append(host, option)
+    const controller = new PageController()
+    const snapshot = controller.capture()
+    const index = snapshot.elements.findIndex(element => element.name === '角色')
+
+    await controller.select(index, '坐席')
+
+    expect(reopened).not.toHaveBeenCalled()
+    expect(picked).toHaveBeenCalledTimes(1)
+  })
+
+  it('Shadow Root 内触发器继承 Host 的展开状态', async () => {
+    const picked = vi.fn()
+    const reopened = vi.fn()
+    const host = document.createElement('div')
+    host.setAttribute('aria-expanded', 'true')
+    const root = host.attachShadow({ mode: 'open' })
+    const trigger = document.createElement('button')
+    trigger.textContent = '角色'
+    trigger.addEventListener('mousedown', reopened)
+    root.append(trigger)
+    const option = document.createElement('button')
+    option.textContent = '坐席'
+    option.addEventListener('mousedown', picked)
+    document.body.append(host, option)
+    const controller = new PageController()
+    const snapshot = controller.capture()
+    const index = snapshot.elements.findIndex(element => element.name === '角色')
+
+    await controller.select(index, '坐席')
+
+    expect(reopened).not.toHaveBeenCalled()
+    expect(picked).toHaveBeenCalledTimes(1)
+  })
+
+  it('匹配选项时排除 Shadow Host 内部元素', async () => {
+    const internalPicked = vi.fn()
+    const optionPicked = vi.fn()
+    const host = document.createElement('div')
+    host.setAttribute('role', 'combobox')
+    host.setAttribute('aria-label', '角色')
+    host.setAttribute('aria-expanded', 'true')
+    const root = host.attachShadow({ mode: 'open' })
+    const internal = document.createElement('button')
+    internal.textContent = '坐席'
+    internal.addEventListener('mousedown', internalPicked)
+    root.append(internal)
+    const option = document.createElement('button')
+    option.textContent = '坐席'
+    option.addEventListener('mousedown', optionPicked)
+    document.body.append(host, option)
+    const controller = new PageController()
+    const snapshot = controller.capture()
+    const index = snapshot.elements.findIndex(element => element.name === '角色')
+
+    await controller.select(index, '坐席')
+
+    expect(internalPicked).not.toHaveBeenCalled()
+    expect(optionPicked).toHaveBeenCalledTimes(1)
+  })
+
   /**
    * rc-select 的选项**没有 `role="option"`**。
    *
@@ -388,6 +520,17 @@ describe('PageController —— 复合下拉（组件库）', () => {
   })
 })
 
+describe('PageController —— 表单校验', () => {
+  it('识别 open Shadow Root 内的表单校验错误', () => {
+    const host = document.createElement('div')
+    const root = host.attachShadow({ mode: 'open' })
+    root.innerHTML = '<form><div role="alert">名称不能为空</div></form>'
+    document.body.append(host)
+
+    expect(new PageController().validationErrors()).toEqual(['名称不能为空'])
+  })
+})
+
 describe('PageController —— 滚动', () => {
   const realScrollBy = window.scrollBy
 
@@ -444,6 +587,23 @@ describe('PageController —— 滚动', () => {
     controller.scroll(1)
 
     expect(content.scrollTop).toBeGreaterThan(0)
+  })
+
+  it('页面不可滚时回退到影子树内最大的滚动容器', () => {
+    const host = document.createElement('div')
+    const root = host.attachShadow({ mode: 'open' })
+    const content = document.createElement('div')
+    content.style.overflowY = 'auto'
+    root.append(content)
+    document.body.append(host)
+    const scrollable = makeScrollable(content, { clientHeight: 600, scrollHeight: 2000 })
+    window.scrollBy = vi.fn() as unknown as typeof window.scrollBy
+    const controller = new PageController()
+    controller.capture()
+
+    controller.scroll(1)
+
+    expect(scrollable.scrollTop).toBeGreaterThan(0)
   })
 
   it('整页本身可滚时就滚整页，不去碰内部容器', () => {

@@ -164,6 +164,89 @@ describe('capturePage —— 索引', () => {
   })
 })
 
+describe('capturePage —— composed tree', () => {
+  it('普通 DOM、影子树和 slot 内容按渲染顺序共享连续索引', () => {
+    const before = document.createElement('button')
+    before.textContent = '之前'
+    const host = document.createElement('section')
+    const root = host.attachShadow({ mode: 'open' })
+    const group = document.createElement('div')
+    group.setAttribute('role', 'button')
+    group.setAttribute('aria-label', '影子组')
+    const slot = document.createElement('slot')
+    slot.name = 'action'
+    group.append(slot)
+    root.append(group)
+    const assigned = document.createElement('button')
+    assigned.slot = 'action'
+    assigned.textContent = '分发按钮'
+    host.append(assigned)
+    const after = document.createElement('button')
+    after.textContent = '之后'
+    document.body.append(before, host, after)
+
+    expect(capturePage().elements.map(element => ({
+      index: element.index,
+      name: element.name,
+      depth: element.depth
+    }))).toEqual([
+      { index: 0, name: '之前', depth: 0 },
+      { index: 1, name: '影子组', depth: 0 },
+      { index: 2, name: '分发按钮', depth: 1 },
+      { index: 3, name: '之后', depth: 0 }
+    ])
+  })
+
+  it('slot 分发文本成为内部按钮的可访问名', () => {
+    const host = document.createElement('div')
+    host.textContent = '保存'
+    const root = host.attachShadow({ mode: 'open' })
+    const button = document.createElement('button')
+    button.append(document.createElement('slot'))
+    root.append(button)
+    document.body.append(host)
+
+    expect(capturePage().elements[0]).toMatchObject({ role: 'button', name: '保存' })
+  })
+
+  it('隐藏 Host 会隐藏 open Shadow Root 内部元素', () => {
+    const host = document.createElement('div')
+    host.hidden = true
+    const root = host.attachShadow({ mode: 'open' })
+    const button = document.createElement('button')
+    button.textContent = '不可见'
+    root.append(button)
+    document.body.append(host)
+
+    expect(capturePage().elements).toHaveLength(0)
+  })
+
+  it('Shadow Root 内 aria-labelledby 与 label[for] 在本 Tree Scope 解析', () => {
+    const host = document.createElement('div')
+    const root = host.attachShadow({ mode: 'open' })
+    root.innerHTML = `
+      <span id="button-name">影子导出</span>
+      <button aria-labelledby="button-name">GO</button>
+      <label for="keyword">关键词</label>
+      <input id="keyword">
+    `
+    document.body.append(host)
+
+    expect(capturePage().elements.map(element => element.name))
+      .toEqual(['影子导出', '关键词'])
+  })
+
+  it('关闭 cursor 推断时仍穿透影子树收录语义控件', () => {
+    const host = document.createElement('div')
+    const root = host.attachShadow({ mode: 'open' })
+    root.innerHTML = '<button>语义按钮</button><div style="cursor:pointer">推断按钮</div>'
+    document.body.append(host)
+
+    expect(capturePage(document, { detectClickableCursor: false }).elements.map(e => e.name))
+      .toEqual(['语义按钮'])
+  })
+})
+
 describe('formatSnapshot', () => {
   it('渲染成模型易读的带索引文本', () => {
     render(`
