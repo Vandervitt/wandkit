@@ -1,11 +1,11 @@
 import type { EvalCategory } from './metrics'
 
 export interface EvalScenario {
-  id: string
-  category: EvalCategory
-  title: string
-  task: string
-  expected: string
+  readonly id: string
+  readonly category: EvalCategory
+  readonly title: string
+  readonly task: string
+  readonly expected: string
 }
 
 export const PAGE_AGENT_SCENARIOS = Object.freeze(

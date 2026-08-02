@@ -32,6 +32,20 @@ const expectedTaskKeywords = new Map([
   ['dynamic-dom', '确认']
 ])
 
+if (false) {
+  const scenario = getPageAgentScenario('read-data')
+  // @ts-expect-error 场景 ID 只读
+  scenario.id = 'changed'
+  // @ts-expect-error 场景类别只读
+  scenario.category = 'navigation'
+  // @ts-expect-error 场景标题只读
+  scenario.title = '已修改'
+  // @ts-expect-error 场景任务只读
+  scenario.task = '已修改'
+  // @ts-expect-error 场景成功判据只读
+  scenario.expected = '已修改'
+}
+
 describe('PAGE_AGENT_SCENARIOS', () => {
   it('定义十个 ID 唯一的评估场景', () => {
     const ids = PAGE_AGENT_SCENARIOS.map(scenario => scenario.id)
