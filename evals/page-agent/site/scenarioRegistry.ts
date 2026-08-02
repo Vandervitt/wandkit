@@ -103,7 +103,7 @@ function answerAffirmsResult(
   return latestAssertion === true
 }
 
-const READ_DATA_RESULT = [/1842/]
+const READ_DATA_RESULT = [/(?:^|[^\d])1842(?!\d)/]
 const NAVIGATION_RESULT = [
   /(?:已经|已)进入(?:了)?话单查询(?:页面)?/,
   /话单查询(?:页面)?(?:已经|已)?(?:打开|进入|显示)/
@@ -131,7 +131,7 @@ const VALIDATION_RECOVERY_RESULT = [
   /赵六联系人(?:已经|已)?创建/,
   /联系人.*赵六.*13800138000/
 ]
-const ASYNC_LOADING_RESULT = [/(?:页面显示)?共?27条/, /日志.*27条/]
+const ASYNC_LOADING_RESULT = [/(?:^|[^\d])27(?!\d)条/]
 const ASK_USER_FALSE_RESULT = [
   /(?:业务)?报表(?:已经|已)?导出(?:成功|完成)?/,
   /(?:已经|已)导出(?:了)?(?:业务)?报表/

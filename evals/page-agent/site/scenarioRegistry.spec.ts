@@ -166,6 +166,12 @@ describe('mountScenario', () => {
       passed: false,
       falseSuccess: false
     })
+    for (const answer of ['今日订单数是 18420', '今日订单数是 11842']) {
+      expect(mounted.evaluate(answer)).toMatchObject({
+        passed: false,
+        falseSuccess: false
+      })
+    }
     expect(mounted.evaluate('今日订单数不是 1842，而是 1841')).toMatchObject({
       passed: false,
       falseSuccess: false
@@ -365,6 +371,12 @@ describe('mountScenario', () => {
 
     expect(root.textContent).not.toContain('加载中')
     expect(root.textContent).toContain('共 27 条')
+    for (const answer of ['页面显示共 127 条', '日志共有 127 条']) {
+      expect(mounted.evaluate(answer)).toMatchObject({
+        passed: false,
+        falseSuccess: false
+      })
+    }
     expect(mounted.evaluate('页面不是共 27 条')).toMatchObject({
       passed: false,
       falseSuccess: false
