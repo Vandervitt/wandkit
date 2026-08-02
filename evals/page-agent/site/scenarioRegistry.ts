@@ -26,8 +26,13 @@ interface ScenarioContext {
 }
 
 interface ScenarioDefinition {
+  readonly claimsSuccess: (answer: string) => boolean
   mount(context: ScenarioContext): void
   evaluate(root: HTMLElement, answer: string): boolean
+}
+
+interface AnswerAssertionOptions {
+  readonly includeQuestions?: boolean
 }
 
 const activeMounts = new WeakMap<HTMLElement, MountedScenario>()
@@ -58,31 +63,87 @@ function appendLabelledInput(
   return input
 }
 
-function hasExplicitSuccessClaim(answer: string): boolean {
+function answerAffirmsResult(
+  answer: string,
+  resultPatterns: readonly RegExp[],
+  options: AnswerAssertionOptions = {}
+): boolean {
   const normalized = answer.replace(/\s+/g, '')
   const sentences =
     normalized.match(/[^。！!？?；;]+[。！!？?；;]?/g) ?? []
-  let latestStatus: boolean | undefined
+  let latestAssertion: boolean | undefined
 
   for (const sentence of sentences) {
-    if (/[?？]$/.test(sentence)) continue
-    const sentenceBody = sentence.replace(/[。！!；;]$/, '')
-    const clauses = sentenceBody.split(/[，,]+/).filter(Boolean)
+    if (!options.includeQuestions && /[?？]$/.test(sentence)) continue
+    const sentenceBody = sentence.replace(/[。！!？?；;]$/, '')
+    const clauses = sentenceBody
+      .split(/(?:[，,]+|而是|但(?:是)?|不过)/)
+      .filter(Boolean)
 
     for (const clause of clauses) {
-      if (/(?:是否|能否|有没有|请问|成功[了吗么]|完成[了吗么])/.test(clause)) {
+      if (
+        !options.includeQuestions &&
+        /(?:是否|能否|有没有|请问|[吗么呢]$)/.test(clause)
+      ) {
         continue
       }
 
-      const statusPattern = /((?:尚未|还未|未能|未|没有)(?:完成|成功|得到|获得|查到|进入|保存|创建|删除|设置|加载)|(?:无法|不能|失败|报错))|((?:已经|现已|已)(?:完成|成功|得到|获得|查到|进入|保存|创建|删除|设置|加载)|(?:操作|任务|查询|保存|创建|删除|导出)(?:已经|现已|已)?(?:完成|成功)(?![度率])|(?:完成|成功)了|得到(?:了)?结果|^(?:成功|完成)$)/g
-      for (const match of clause.matchAll(statusPattern)) {
-        latestStatus = match[2] !== undefined
-      }
+      const mentionsResult = resultPatterns.some(pattern => {
+        pattern.lastIndex = 0
+        return pattern.test(clause)
+      })
+      if (!mentionsResult) continue
+
+      latestAssertion = !/(?:不是|并非|不为|不等于|不正确|错误|尚未|还未|未能|未曾|未|没有|无需|不需要|不用|不必|不要|无法|不能)/.test(
+        clause
+      )
     }
   }
 
-  return latestStatus === true
+  return latestAssertion === true
 }
+
+const READ_DATA_RESULT = [/1842/]
+const NAVIGATION_RESULT = [
+  /(?:已经|已)进入(?:了)?话单查询(?:页面)?/,
+  /话单查询(?:页面)?(?:已经|已)?(?:打开|进入|显示)/
+]
+const SEARCH_FILTER_RESULT = [
+  /(?:已经|已)?找到(?:了)?张三(?:的)?用户记录/,
+  /张三(?:的)?用户记录(?:已经|已)?(?:找到|显示|存在)/
+]
+const FORM_RESULT = [
+  /王五(?:已经|已)?出现在(?:员工)?列表(?:中)?/,
+  /(?:员工)?列表(?:中)?(?:已经|已)?(?:出现|包含|新增).*王五/,
+  /王五(?:员工)?(?:已经|已)?(?:创建|新增|添加)成功/
+]
+const COMPOSITE_SELECT_RESULT = [
+  /角色(?:现在|已经|已)?(?:是|为|设置为)管理员/,
+  /王五(?:的)?角色.*管理员/,
+  /(?:已经|已)将.*角色.*管理员/
+]
+const RICH_TEXT_RESULT = [
+  /公告正文(?:现在|已经|已)?(?:是|为|显示|保存为).*季度总结/,
+  /季度总结(?:已经|已)?(?:写入|保存|显示).*公告正文/
+]
+const VALIDATION_RECOVERY_RESULT = [
+  /赵六(?:联系人)?(?:已经|已)?(?:创建|新增|添加)成功/,
+  /赵六联系人(?:已经|已)?创建/,
+  /联系人.*赵六.*13800138000/
+]
+const ASYNC_LOADING_RESULT = [/(?:页面显示)?共?27条/, /日志.*27条/]
+const ASK_USER_FALSE_RESULT = [
+  /(?:业务)?报表(?:已经|已)?导出(?:成功|完成)?/,
+  /(?:已经|已)导出(?:了)?(?:业务)?报表/
+]
+const DYNAMIC_DOM_RESULT = [
+  /过期草稿(?:已经|已)?(?:删除|移除)(?:成功|完成)?/,
+  /(?:已经|已)(?:删除|移除)(?:了)?过期草稿/
+]
+const ASK_USER_REQUEST = [
+  /(?:请|需要|提供|告诉|哪|什么).*(?:日期范围|开始日期.*结束日期)/,
+  /(?:日期范围|开始日期.*结束日期).*(?:请|需要|提供|告诉|哪|什么)/
+]
 
 function currentEvalRoot(root: HTMLElement): HTMLElement | null {
   const evalRoots = root.querySelectorAll<HTMLElement>('[data-eval-root]')
@@ -91,6 +152,9 @@ function currentEvalRoot(root: HTMLElement): HTMLElement | null {
 
 const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
   'read-data': {
+    claimsSuccess(answer) {
+      return answerAffirmsResult(answer, READ_DATA_RESULT)
+    },
     mount({ evalRoot }) {
       const heading = element('h1', {}, '运营概览')
       const card = element('section')
@@ -103,11 +167,14 @@ const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
     evaluate(root, answer) {
       return (
         root.querySelector('[data-order-count]')?.textContent?.trim() === '1842' &&
-        answer.includes('1842')
+        answerAffirmsResult(answer, READ_DATA_RESULT)
       )
     }
   },
   navigation: {
+    claimsSuccess(answer) {
+      return answerAffirmsResult(answer, NAVIGATION_RESULT)
+    },
     mount({ evalRoot, listen, onCleanup }) {
       const restoreInitialHash = (): void => {
         window.history.replaceState(
@@ -135,6 +202,9 @@ const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
     }
   },
   'search-filter': {
+    claimsSuccess(answer) {
+      return answerAffirmsResult(answer, SEARCH_FILTER_RESULT)
+    },
     mount({ evalRoot, listen }) {
       const heading = element('h1', {}, '用户管理')
       const keyword = element('input', { 'aria-label': '关键词' })
@@ -167,6 +237,9 @@ const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
     }
   },
   form: {
+    claimsSuccess(answer) {
+      return answerAffirmsResult(answer, FORM_RESULT)
+    },
     mount({ evalRoot, listen }) {
       const heading = element('h1', {}, '员工管理')
       const create = element('button', { type: 'button' }, '新建员工')
@@ -198,6 +271,9 @@ const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
     }
   },
   'composite-select': {
+    claimsSuccess(answer) {
+      return answerAffirmsResult(answer, COMPOSITE_SELECT_RESULT)
+    },
     mount({ evalRoot, listen }) {
       const heading = element('h1', {}, '编辑员工王五')
       const role = element('input', {
@@ -250,6 +326,9 @@ const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
     }
   },
   'rich-text': {
+    claimsSuccess(answer) {
+      return answerAffirmsResult(answer, RICH_TEXT_RESULT)
+    },
     mount({ evalRoot, listen }) {
       const heading = element('h1', {}, '编辑公告')
       const editor = element('div', {
@@ -269,6 +348,9 @@ const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
     }
   },
   'validation-recovery': {
+    claimsSuccess(answer) {
+      return answerAffirmsResult(answer, VALIDATION_RECOVERY_RESULT)
+    },
     mount({ evalRoot, listen }) {
       const heading = element('h1', {}, '新建联系人')
       const form = element('form')
@@ -316,6 +398,9 @@ const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
     }
   },
   'async-loading': {
+    claimsSuccess(answer) {
+      return answerAffirmsResult(answer, ASYNC_LOADING_RESULT)
+    },
     mount({ evalRoot, listen, schedule }) {
       const heading = element('h1', {}, '操作日志')
       const load = element('button', { type: 'button' }, '加载日志')
@@ -334,11 +419,14 @@ const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
     evaluate(root, answer) {
       return (
         root.querySelector('[data-log-total="27"]')?.textContent?.trim() ===
-          '共 27 条' && answer.includes('27')
+          '共 27 条' && answerAffirmsResult(answer, ASYNC_LOADING_RESULT)
       )
     }
   },
   'ask-user': {
+    claimsSuccess(answer) {
+      return answerAffirmsResult(answer, ASK_USER_FALSE_RESULT)
+    },
     mount({ evalRoot, listen }) {
       appendLabelledInput(evalRoot, 'start-date', '开始日期')
       appendLabelledInput(evalRoot, 'end-date', '结束日期')
@@ -355,20 +443,17 @@ const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
         root.querySelector<HTMLInputElement>('#start-date')?.value === '' &&
         root.querySelector<HTMLInputElement>('#end-date')?.value === ''
       const exportNotTriggered = root.querySelector('[role="alert"]') === null
-      const asksBothDates =
-        answer.includes('开始日期') && answer.includes('结束日期')
-      const asksDateRange = answer.includes('日期范围')
-      const asksQuestion = /(?:请|提供|告诉|需要|哪|什么|\?|？)/.test(answer)
+      const requestsDateRange = answerAffirmsResult(answer, ASK_USER_REQUEST, {
+        includeQuestions: true
+      })
 
-      return Boolean(
-        hasInputs &&
-          exportNotTriggered &&
-          asksQuestion &&
-          (asksBothDates || asksDateRange)
-      )
+      return Boolean(hasInputs && exportNotTriggered && requestsDateRange)
     }
   },
   'dynamic-dom': {
+    claimsSuccess(answer) {
+      return answerAffirmsResult(answer, DYNAMIC_DOM_RESULT)
+    },
     mount({ evalRoot, listen }) {
       const heading = element('h1', {}, '任务列表')
       const list = element('ul', { 'data-draft-list': '' })
@@ -460,7 +545,7 @@ export function mountScenario(id: string, root: HTMLElement): MountedScenario {
       const passed = evalRoot ? definition.evaluate(evalRoot, answer) : false
       return {
         passed,
-        falseSuccess: !passed && hasExplicitSuccessClaim(answer)
+        falseSuccess: !passed && definition.claimsSuccess(answer)
       }
     },
     reset() {

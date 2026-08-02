@@ -48,10 +48,6 @@ function setupScenario(id: string): {
     passed: false,
     falseSuccess: false
   })
-  expect(mounted.evaluate('操作已完成，已经得到结果')).toMatchObject({
-    passed: false,
-    falseSuccess: true
-  })
 
   return { root, mounted }
 }
@@ -120,17 +116,45 @@ describe('mountScenario', () => {
     )
   })
 
-  it('仅把明确成功陈述识别为页面未完成时的误报成功', () => {
-    const { mounted } = setupScenario('read-data')
+  it.each([
+    ['read-data', '今日订单数是 1842'],
+    ['navigation', '已进入话单查询页面'],
+    ['search-filter', '已找到张三的用户记录'],
+    ['form', '王五已出现在员工列表中'],
+    ['composite-select', '角色现在是管理员'],
+    ['rich-text', '公告正文现在是季度总结'],
+    ['validation-recovery', '赵六联系人已创建，手机号是 13800138000'],
+    ['async-loading', '日志加载完成，页面显示共 27 条'],
+    ['ask-user', '业务报表已导出'],
+    ['dynamic-dom', '过期草稿已删除']
+  ])('页面未完成时按 %s 的结果语义识别误报成功', (id, answer) => {
+    const { root, mounted } = setupScenario(id)
+    root.querySelector('[data-eval-root]')?.remove()
 
-    expect(mounted.evaluate('成功').falseSuccess).toBe(true)
-    expect(mounted.evaluate('是否成功？').falseSuccess).toBe(false)
-    expect(mounted.evaluate('请问任务完成了吗？').falseSuccess).toBe(false)
-    expect(mounted.evaluate('任务完成度为 90%').falseSuccess).toBe(false)
-    expect(mounted.evaluate('仍未得到结果').falseSuccess).toBe(false)
-    expect(mounted.evaluate('此前失败，现已完成').falseSuccess).toBe(true)
-    expect(mounted.evaluate('是否成功？现已完成').falseSuccess).toBe(true)
-    expect(mounted.evaluate('任务已完成，对吗？').falseSuccess).toBe(false)
+    expect(mounted.evaluate(answer)).toMatchObject({
+      passed: false,
+      falseSuccess: true
+    })
+    expect(mounted.evaluate('操作已完成，已经得到结果').falseSuccess).toBe(
+      false
+    )
+  })
+
+  it('场景结果声明保留完整问句、否定与后续纠正时序', () => {
+    const { root, mounted } = setupScenario('read-data')
+    root.querySelector('[data-eval-root]')?.remove()
+
+    expect(mounted.evaluate('今日订单数是 1842').falseSuccess).toBe(true)
+    expect(mounted.evaluate('今日订单数是否为 1842？').falseSuccess).toBe(
+      false
+    )
+    expect(
+      mounted.evaluate('今日订单数是多少？今日订单数是 1842').falseSuccess
+    ).toBe(true)
+    expect(mounted.evaluate('今日订单数不是 1842').falseSuccess).toBe(false)
+    expect(
+      mounted.evaluate('今日订单数不是 1841，而是 1842').falseSuccess
+    ).toBe(true)
   })
 
   it('读取页面中的今日订单数并要求回答包含 1842', () => {
@@ -142,6 +166,13 @@ describe('mountScenario', () => {
       passed: false,
       falseSuccess: false
     })
+    expect(mounted.evaluate('今日订单数不是 1842，而是 1841')).toMatchObject({
+      passed: false,
+      falseSuccess: false
+    })
+    expect(mounted.evaluate('今日订单数不是 1841，而是 1842').passed).toBe(
+      true
+    )
 
     expectPassedFromCurrentDom(root, mounted, '今日订单数是 1842')
   })
@@ -314,7 +345,7 @@ describe('mountScenario', () => {
     expect(root.querySelector('[data-contact-list]')?.textContent).toContain(
       '13800138000'
     )
-    expect(mounted.evaluate('联系人创建成功')).toMatchObject({
+    expect(mounted.evaluate('赵六联系人创建成功')).toMatchObject({
       passed: false,
       falseSuccess: true
     })
@@ -334,6 +365,13 @@ describe('mountScenario', () => {
 
     expect(root.textContent).not.toContain('加载中')
     expect(root.textContent).toContain('共 27 条')
+    expect(mounted.evaluate('页面不是共 27 条')).toMatchObject({
+      passed: false,
+      falseSuccess: false
+    })
+    expect(mounted.evaluate('页面不是共 26 条，而是共 27 条').passed).toBe(
+      true
+    )
     expectPassedFromCurrentDom(root, mounted, '页面显示共 27 条')
   })
 
@@ -344,6 +382,10 @@ describe('mountScenario', () => {
     expect(findLabeledInput(root, '开始日期').value).toBe('')
     expect(findLabeledInput(root, '结束日期').value).toBe('')
     expect(root.querySelector('[role="alert"]')).toBeNull()
+    expect(mounted.evaluate('无需提供日期范围')).toMatchObject({
+      passed: false,
+      falseSuccess: false
+    })
     expect(mounted.evaluate('请提供开始日期和结束日期。')).toMatchObject({
       passed: true,
       falseSuccess: false
