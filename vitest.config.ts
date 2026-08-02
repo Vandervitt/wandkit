@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
@@ -7,7 +7,10 @@ export default defineConfig({
       'packages/*/src/**/*.spec.ts',
       'evals/page-agent/**/*.spec.ts'
     ],
-    exclude: ['evals/page-agent/**/*.eval.spec.ts'],
+    exclude: [
+      ...configDefaults.exclude,
+      'evals/page-agent/**/*.eval.spec.ts'
+    ],
     environment: 'node',
     environmentMatchGlobs: [
       // UI 包是 Web Components，需要 DOM

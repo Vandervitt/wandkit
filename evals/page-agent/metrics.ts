@@ -1,14 +1,17 @@
-export type EvalCategory =
-  | 'read_data'
-  | 'navigation'
-  | 'search_filter'
-  | 'form'
-  | 'composite_select'
-  | 'rich_text'
-  | 'validation_recovery'
-  | 'async_loading'
-  | 'ask_user'
-  | 'dynamic_dom'
+export const EVAL_CATEGORIES = [
+  'read_data',
+  'navigation',
+  'search_filter',
+  'form',
+  'composite_select',
+  'rich_text',
+  'validation_recovery',
+  'async_loading',
+  'ask_user',
+  'dynamic_dom'
+] as const
+
+export type EvalCategory = (typeof EVAL_CATEGORIES)[number]
 
 export type EvalFailureCode =
   | 'model_protocol'
@@ -57,19 +60,6 @@ export interface EvalSummary extends CategorySummary {
   byCategory: Record<EvalCategory, CategorySummary>
 }
 
-const EVAL_CATEGORIES: readonly EvalCategory[] = [
-  'read_data',
-  'navigation',
-  'search_filter',
-  'form',
-  'composite_select',
-  'rich_text',
-  'validation_recovery',
-  'async_loading',
-  'ask_user',
-  'dynamic_dom'
-]
-
 interface CategoryCounts {
   total: number
   passed: number
@@ -77,12 +67,11 @@ interface CategoryCounts {
 }
 
 export function summarizeAttempts(attempts: readonly EvalAttempt[]): EvalSummary {
-  const categoryCounts = Object.fromEntries(
-    EVAL_CATEGORIES.map(category => [
-      category,
-      { total: 0, passed: 0, falseSuccesses: 0 }
-    ])
-  ) as Record<EvalCategory, CategoryCounts>
+  const categoryCounts = createCategoryRecord(() => ({
+    total: 0,
+    passed: 0,
+    falseSuccesses: 0
+  }))
 
   let passed = 0
   let falseSuccesses = 0
@@ -100,12 +89,9 @@ export function summarizeAttempts(attempts: readonly EvalAttempt[]): EvalSummary
   }
 
   const total = attempts.length
-  const byCategory = Object.fromEntries(
-    EVAL_CATEGORIES.map(category => {
-      const counts = categoryCounts[category]
-      return [category, toCategorySummary(counts)]
-    })
-  ) as Record<EvalCategory, CategorySummary>
+  const byCategory = createCategoryRecord(category => {
+    return toCategorySummary(categoryCounts[category])
+  })
 
   return {
     total,
@@ -156,6 +142,14 @@ function toCategorySummary(counts: CategoryCounts): CategorySummary {
     successRate: rate(counts.passed, counts.total),
     falseSuccessRate: rate(counts.falseSuccesses, counts.total)
   }
+}
+
+function createCategoryRecord<Value>(
+  createValue: (category: EvalCategory) => Value
+): Record<EvalCategory, Value> {
+  return Object.fromEntries(
+    EVAL_CATEGORIES.map(category => [category, createValue(category)])
+  ) as Record<EvalCategory, Value>
 }
 
 function rate(count: number, total: number): number {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  EVAL_CATEGORIES,
   formatEvalSummaryMarkdown,
   summarizeAttempts,
   type EvalAttempt,
@@ -7,18 +8,7 @@ import {
   type EvalFailureCode
 } from './metrics'
 
-const categories: EvalCategory[] = [
-  'read_data',
-  'navigation',
-  'search_filter',
-  'form',
-  'composite_select',
-  'rich_text',
-  'validation_recovery',
-  'async_loading',
-  'ask_user',
-  'dynamic_dom'
-]
+const categories: readonly EvalCategory[] = EVAL_CATEGORIES
 
 function attempt(overrides: Partial<EvalAttempt> = {}): EvalAttempt {
   return {
@@ -133,6 +123,22 @@ describe('formatEvalSummaryMarkdown', () => {
     expect(markdown).toContain('| P95 耗时 | 300 ms |')
     expect(markdown).toContain('| read_data | 2 | 1 | 50.00% | 50.00% |')
     expect(markdown).toContain('| dynamic_dom | 0 | 0 | 0.00% | 0.00% |')
-    expect(markdown.match(/^\| (?:read_data|navigation|search_filter|form|composite_select|rich_text|validation_recovery|async_loading|ask_user|dynamic_dom) \|/gm)).toHaveLength(10)
+    const categoryRows = markdown.split('\n').filter(row => {
+      return EVAL_CATEGORIES.some(category => row.startsWith(`| ${category} |`))
+    })
+    expect(categoryRows).toHaveLength(EVAL_CATEGORIES.length)
+  })
+
+  it('将三分之一成功率格式化为 33.33%', () => {
+    const summary = summarizeAttempts([
+      attempt(),
+      attempt({ passed: false }),
+      attempt({ passed: false })
+    ])
+
+    const markdown = formatEvalSummaryMarkdown(summary)
+
+    expect(markdown).toContain('| 成功率 | 33.33% |')
+    expect(markdown).toContain('| read_data | 3 | 1 | 33.33% | 0.00% |')
   })
 })
