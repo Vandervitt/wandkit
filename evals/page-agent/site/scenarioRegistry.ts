@@ -208,6 +208,14 @@ const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
       })
       role.readOnly = true
       role.value = '普通员工'
+      const save = element('button', { type: 'button' }, '保存')
+      const roleDetail = element('p')
+      const savedRole = element(
+        'span',
+        { 'data-saved-role': '' },
+        '普通员工'
+      )
+      roleDetail.append('当前角色：', savedRole)
 
       listen(role, 'click', () => {
         if (evalRoot.querySelector('[role="listbox"]')) return
@@ -229,13 +237,15 @@ const scenarioDefinitions: Readonly<Record<string, ScenarioDefinition>> = {
         role.setAttribute('aria-expanded', 'true')
         evalRoot.append(listbox)
       })
+      listen(save, 'click', () => {
+        savedRole.textContent = role.value
+      })
 
-      evalRoot.append(heading, role)
+      evalRoot.append(heading, role, save, roleDetail)
     },
     evaluate(root) {
       return (
-        root.querySelector<HTMLInputElement>('input[aria-label="角色"]')?.value ===
-        '管理员'
+        root.querySelector('[data-saved-role]')?.textContent?.trim() === '管理员'
       )
     }
   },

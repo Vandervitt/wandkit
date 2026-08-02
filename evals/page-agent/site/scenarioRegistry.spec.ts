@@ -221,7 +221,7 @@ describe('mountScenario', () => {
     expectPassedFromCurrentDom(root, mounted, '员工创建成功')
   })
 
-  it('从组合选择框选择管理员并关闭选项浮层', () => {
+  it('选择管理员后必须保存才更新最终角色并通过评估', () => {
     const { root, mounted } = setupScenario('composite-select')
     const role = root.querySelector<HTMLInputElement>(
       'input[aria-label="角色"]'
@@ -241,6 +241,14 @@ describe('mountScenario', () => {
         button => button.textContent?.trim() === '管理员'
       )
     ).toBe(false)
+    expect(mounted.evaluate('角色已设置为管理员')).toMatchObject({
+      passed: false,
+      falseSuccess: true
+    })
+
+    findButton(root, '保存').click()
+
+    expect(root.querySelector('[data-saved-role]')?.textContent).toBe('管理员')
     expectPassedFromCurrentDom(root, mounted, '角色已设置为管理员')
   })
 
