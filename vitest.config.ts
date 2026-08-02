@@ -17,7 +17,8 @@ export default defineConfig({
       ['packages/ui/**', 'jsdom'],
       ['packages/executor/**', 'jsdom'],
       ['packages/chat/**', 'jsdom'],
-      ['packages/interceptor/**', 'jsdom']
+      ['packages/interceptor/**', 'jsdom'],
+      ['evals/page-agent/site/**/*.spec.ts', 'jsdom']
     ]
   }
 })
