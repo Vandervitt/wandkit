@@ -43,7 +43,7 @@ export {
   ToolPreparationNotice
 } from './contracts/result'
 export type { RunSnapshot, RunState, RunStatus } from './contracts/run'
-export type { LlmMessage, LlmAssistantMessage } from './contracts/llm'
+export type { LlmMessage, LlmAssistantMessage, LlmClient } from './contracts/llm'
 export { toOpenAIToolDefinition } from './contracts/openAITool'
 export { isValidToolSunsetDate } from './contracts/toolLifecycle'
 export {
