@@ -152,6 +152,18 @@ export function createOpenAICompatibleLlm(
         )
       }
 
+      if (!isRecord(responseBody) || typeof responseBody.model !== 'string') {
+        throw new Error(
+          'OpenAI-compatible 代理返回结构异常: 缺少实际 model'
+        )
+      }
+      if (responseBody.model !== options.model) {
+        throw new Error(
+          `OpenAI-compatible 代理模型不一致: 请求 ${options.model}，` +
+          `响应 ${responseBody.model}`
+        )
+      }
+
       const message = assistantMessageFrom(responseBody)
       if (!message) {
         throw new Error(

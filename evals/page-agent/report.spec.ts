@@ -206,6 +206,7 @@ describe('writeRealReport', () => {
     expect(report.metadata).toMatchObject({
       runner: 'legacy',
       mode: 'real',
+      gitDirty: expect.any(Boolean),
       model: 'vendor/model',
       repetitions: 3,
       maxRounds: 20,

@@ -153,6 +153,12 @@ function classifyFailure(
   stopReason?: string
 ): FailureClassification {
   if (status !== 'completed') {
+    if (isProxyInfrastructureFailure(stopReason)) {
+      return {
+        code: 'runtime_error',
+        message: stopReason ?? 'OpenAI-compatible 代理失败。'
+      }
+    }
     if (isMaxRoundsFailure(stopReason)) {
       return {
         code: 'repeated_action',
@@ -227,6 +233,10 @@ function isModelProtocolFailure(stopReason?: string): boolean {
 
 function isMaxRoundsFailure(stopReason?: string): boolean {
   return stopReason?.includes(OPENAI_COMPATIBLE_MAX_ROUNDS_ERROR_CODE) === true
+}
+
+function isProxyInfrastructureFailure(stopReason?: string): boolean {
+  return stopReason?.includes('OpenAI-compatible 代理') === true
 }
 
 function currentScenarioRoot(scenarioId: string): HTMLElement | null {

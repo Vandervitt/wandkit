@@ -33,6 +33,7 @@ export interface LegacyReportBrowserMetadata {
 export interface LegacyReportMetadata {
   readonly runner: 'legacy'
   readonly gitRevision: string
+  readonly gitDirty: boolean
   readonly nodeVersion: string
   readonly osPlatform: string
   readonly osArch: string
@@ -142,6 +143,7 @@ export async function writeLegacyReport(
   const metadata: LegacyReportMetadata = {
     runner: 'legacy' as const,
     gitRevision: gitRevision(),
+    gitDirty: gitDirty(),
     nodeVersion: process.version,
     osPlatform: platform(),
     osArch: arch(),
@@ -184,6 +186,7 @@ export async function writeRealReport(
     runner: 'legacy' as const,
     mode: 'real' as const,
     gitRevision: gitRevision(),
+    gitDirty: gitDirty(),
     nodeVersion: process.version,
     osPlatform: platform(),
     osArch: arch(),
@@ -243,6 +246,7 @@ function formatRealMarkdown(
   metadata: {
     readonly runner: 'legacy'
     readonly mode: 'real'
+    readonly gitDirty: boolean
     readonly model: string
     readonly repetitions: number
     readonly maxRounds: number
@@ -263,6 +267,7 @@ function formatRealMarkdown(
   const environmentRows = [
     ['Runner', metadata.runner],
     ['Mode', metadata.mode],
+    ['Git dirty', String(metadata.gitDirty)],
     ['Model', metadata.model],
     ['Repetitions', String(metadata.repetitions)],
     ['Max rounds per attempt', String(metadata.maxRounds)],
@@ -331,6 +336,7 @@ function formatLegacyMarkdown(
   const environmentRows = [
     ['Runner', metadata.runner],
     ['Git revision', metadata.gitRevision],
+    ['Git dirty', String(metadata.gitDirty)],
     ['Node.js', metadata.nodeVersion],
     ['OS platform', metadata.osPlatform],
     ['OS arch', metadata.osArch],
@@ -374,6 +380,18 @@ function gitRevision(): string {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore']
   }).trim()
+}
+
+function gitDirty(): boolean {
+  return execFileSync(
+    'git',
+    ['status', '--porcelain', '--untracked-files=no'],
+    {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }
+  ).trim() !== ''
 }
 
 function extractChromiumBuild(executablePath?: string): string | undefined {

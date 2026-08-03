@@ -29,6 +29,7 @@ describe('createOpenAICompatibleLlm', () => {
       fetchImpl: fetchStub(async (input, init) => {
         requests.push({ input, init })
         return new Response(JSON.stringify({
+          model,
           message: {
             role: 'assistant',
             content: null,
@@ -74,6 +75,7 @@ describe('createOpenAICompatibleLlm', () => {
       response: {
         status: 200,
         body: {
+          model,
           message: {
             role: 'assistant',
             content: null,
@@ -114,7 +116,7 @@ describe('createOpenAICompatibleLlm', () => {
       endpoint,
       model,
       fetchImpl: fetchStub(async () => new Response(
-        JSON.stringify({ choices: [] }),
+        JSON.stringify({ model, choices: [] }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       ))
     })
@@ -150,6 +152,7 @@ describe('createOpenAICompatibleLlm', () => {
       fetchImpl: fetchStub(async (_input, init) => {
         capturedInit = init
         return new Response(JSON.stringify({
+          model,
           message: { role: 'assistant', content: '完成' }
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }),
@@ -174,6 +177,7 @@ describe('createOpenAICompatibleLlm', () => {
       fetchImpl: fetchStub(async () => {
         fetchCalls += 1
         return new Response(JSON.stringify({
+          model,
           message: { role: 'assistant', content: '继续' }
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }),
@@ -187,5 +191,34 @@ describe('createOpenAICompatibleLlm', () => {
     )
     expect(fetchCalls).toBe(2)
     expect(exchanges).toHaveLength(2)
+  })
+
+  it('代理响应缺少实际 model 时明确失败', async () => {
+    const llm = createOpenAICompatibleLlm({
+      endpoint,
+      model,
+      fetchImpl: fetchStub(async () => new Response(JSON.stringify({
+        message: { role: 'assistant', content: '完成' }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    })
+
+    await expect(llm.chat(messages, tools)).rejects.toThrow(
+      'OpenAI-compatible 代理返回结构异常: 缺少实际 model'
+    )
+  })
+
+  it('代理实际 model 与请求 model 不一致时明确失败', async () => {
+    const llm = createOpenAICompatibleLlm({
+      endpoint,
+      model,
+      fetchImpl: fetchStub(async () => new Response(JSON.stringify({
+        model: 'other-model',
+        message: { role: 'assistant', content: '完成' }
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    })
+
+    await expect(llm.chat(messages, tools)).rejects.toThrow(
+      'OpenAI-compatible 代理模型不一致: 请求 test-model，响应 other-model'
+    )
   })
 })

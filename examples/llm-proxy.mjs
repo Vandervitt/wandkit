@@ -15,10 +15,12 @@
  *       const r = await fetch('http://127.0.0.1:8788/llm/chat', {
  *         method: 'POST',
  *         headers: { 'Content-Type': 'application/json' },
- *         body: JSON.stringify({ messages, tools }),
+ *         body: JSON.stringify({ model: 'glm-4-flash', messages, tools }),
  *         signal
  *       })
- *       return (await r.json()).message
+ *       const payload = await r.json()
+ *       if (payload.model !== 'glm-4-flash') throw new Error('代理模型不一致')
+ *       return payload.message
  *     }
  *   }
  *
@@ -79,14 +81,25 @@ const server = createServer((req, res) => {
   req.on('data', chunk => chunks.push(chunk))
   req.on('end', async () => {
     try {
-      const { messages, tools } = JSON.parse(Buffer.concat(chunks).toString('utf8'))
+      const { model, messages, tools } = JSON.parse(
+        Buffer.concat(chunks).toString('utf8')
+      )
+      if (model !== undefined && (typeof model !== 'string' || !model.trim())) {
+        throw new Error('model 必须是非空字符串')
+      }
+      const actualModel = model?.trim() || MODEL
       const upstream = await fetch(`${BASE_URL}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${API_KEY}`
         },
-        body: JSON.stringify({ model: MODEL, messages, tools, temperature: 0 })
+        body: JSON.stringify({
+          model: actualModel,
+          messages,
+          tools,
+          temperature: 0
+        })
       })
 
       if (!upstream.ok) {
@@ -107,7 +120,7 @@ const server = createServer((req, res) => {
       }
       console.log(describe(messages, message))
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ message }))
+      res.end(JSON.stringify({ model: actualModel, message }))
     } catch (error) {
       console.error(`  ✗ ${error.message}`)
       res.writeHead(500, { 'Content-Type': 'application/json' })
@@ -118,6 +131,6 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`LLM 代理已启动：http://127.0.0.1:${PORT}/llm/chat`)
-  console.log(`模型：${MODEL} @ ${BASE_URL}`)
+  console.log(`默认模型：${MODEL} @ ${BASE_URL}`)
   console.log('Key 只在本进程内，浏览器拿不到。仅供本地开发。\n')
 })
