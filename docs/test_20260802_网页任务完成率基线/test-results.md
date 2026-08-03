@@ -215,8 +215,8 @@ provenance 核对：
 | model 来源证据 | 代理回应直接取自上游 `payload.model`；单测使用与请求不同的 `upstream-actual-model` 证明不是回显 |
 | checkpoint | 每个 attempt 完成后以同一 runId 覆盖写入 attempts/summary/exchanges，最终共 30 条 |
 
-最终 HEAD 会比上述报告 revision 多一个仅更新本文档的提交；
-真实评估对应的代码内容仍由上述 revision 唯一标识。
+当前分支在 `d7fa5e1` 后仅包含评估结果与验收文档更新；这些提交不改变该报告
+对应的评估代码，真实评估代码内容仍由上述 revision 标识。
 
 总体结果：
 

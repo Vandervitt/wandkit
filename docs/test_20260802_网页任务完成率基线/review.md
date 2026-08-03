@@ -26,7 +26,7 @@
 | 假成功独立统计 | `EvalAttempt.falseSuccess`、总体/分类 `falseSuccessRate`、确定性报告 2 / 10 假成功 | 符合 |
 | Runner 与场景解耦 | 场景元数据、registry、`runLegacyRuntime` 和报告聚合分层；Runner 通过场景目录取得 task/category | 符合 |
 | 确定性与真实模型双入口 | `npm run eval:page-agent` 只选择 deterministic spec；`npm run eval:page-agent:real` 显式启用 real spec | 符合 |
-| 真实模式缺少配置不静默成功 | endpoint、model、attempts、rounds、场景过滤均有负向门禁；基础设施错误使用稳定 marker 并令 Playwright 失败 | 符合 |
+| 配置错误或基础设施故障不静默成功 | 非法 endpoint、model、attempts、rounds、场景过滤均有负向门禁；基础设施故障使用稳定 marker 并令 Playwright 失败 | 符合 |
 | Key 不进入浏览器 | 浏览器只访问 loopback `/llm/chat`，请求不含鉴权头；本地代理独占 `LLM_API_KEY` | 符合 |
 | 报告可比较 | 报告包含 revision/dirty、Node/OS、Playwright/Chromium、model、runId、总体/分类统计和场景明细 | 符合 |
 | 产物不进入 Git | `resolveEvalOutputDir` 仅允许 `.playwright/` 明确后代；`.gitignore` 命中报告和 trace，`git ls-files '.playwright/**'` 为空 | 符合 |
@@ -38,7 +38,7 @@
 | --- | --- | --- |
 | Task 5 集成与报告审查（`f06c4e8`） | 确定性期望未钉死 steps/falseSuccess；失败分类由脚本预置而非终态推导；最终判据异常会丢失已发生步骤；报告缺少可比较的浏览器与 revision 信息；输出目录和 artifacts 未隔离 | `page-agent.eval.spec.ts` 钉死 10 场景结果并覆盖判据异常；`main.ts` 从 Runtime/DOM 终态分类；`report.spec.ts` 覆盖 metadata、目录越界和符号链接；本轮 deterministic E2E 3 / 3 通过 |
 | Task 6 第一轮契约审查（`204a0b9`） | real 配置散落；loopback/path、非空 model、未知场景和成本上限缺少集中门禁；客户端未校验响应 model；报告缺少 dirty provenance；模型不一致未成为 Playwright 门禁 | `realEvalConfig.spec.ts` 20 / 20、`openAICompatibleLlm.spec.ts` 10 / 10、`report.spec.ts` 14 / 14 在本轮完整 Vitest 中通过；负向门禁证据保留在 `test-results.md` |
-| Task 6 第二轮信度审查（`d7fa5e1`） | 代理曾回显请求 model，不能证明上游实际 model；DOM 成功可能掩盖 Runtime 失败；基础设施错误依赖文案；长矩阵缺少逐 attempt checkpoint；untracked 未计入 dirty | 代理只回传上游 `payload.model` 且缺失时返回 502；Playwright 回归覆盖 DOM 成功但 Runtime 失败；稳定 infrastructure marker；`realEvalRunner.spec.ts` 2 / 2 覆盖 checkpoint/中止；`readGitDirty` 包含 untracked |
+| Task 6 第二轮可信度审查（`d7fa5e1`） | 代理曾回显请求 model，不能证明上游实际 model；DOM 成功可能掩盖 Runtime 失败；基础设施错误依赖文案；长矩阵缺少逐 attempt checkpoint；untracked 未计入 dirty | 代理只回传上游 `payload.model` 且缺失时返回 502；Playwright 回归覆盖 DOM 成功但 Runtime 失败；稳定 infrastructure marker；`realEvalRunner.spec.ts` 2 / 2 覆盖 checkpoint/中止；`readGitDirty` 包含 untracked |
 
 以上问题均已由当前分支代码和测试覆盖关闭；本轮未发现新的集成映射缺口，
 因此没有修改评估代码。
