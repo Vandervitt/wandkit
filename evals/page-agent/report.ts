@@ -10,6 +10,7 @@ import {
   summarizeAttempts,
   type EvalAttempt
 } from './metrics'
+import type { OpenAICompatibleExchange } from './site/openAICompatibleLlm'
 
 export const BROWSER_PLUGIN_STATUS = 'Browser plugin not available'
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
@@ -42,6 +43,33 @@ export interface LegacyReportMetadata {
   readonly chromiumBuild?: string
   readonly browserPlugin: typeof BROWSER_PLUGIN_STATUS
   readonly generatedAt: string
+}
+
+export interface RealReportAttempt {
+  readonly attempt: number
+  readonly result: EvalAttempt
+}
+
+export interface RealReportExchangeRecord {
+  readonly scenarioId: string
+  readonly attempt: number
+  readonly exchanges: readonly OpenAICompatibleExchange[]
+}
+
+export interface RealReportOptions extends LegacyReportBrowserMetadata {
+  readonly runId: string
+  readonly model: string
+  readonly repetitions: number
+  readonly maxRounds: number
+  readonly scenarioIds: readonly string[]
+  readonly endpoint: string
+  readonly exchanges: readonly RealReportExchangeRecord[]
+}
+
+export interface RealReportFiles {
+  readonly json: string
+  readonly markdown: string
+  readonly exchanges: string
 }
 
 export function resolveEvalOutputDir(): string {
@@ -141,6 +169,146 @@ export async function writeLegacyReport(
   ])
 }
 
+export async function writeRealReport(
+  records: readonly RealReportAttempt[],
+  options: RealReportOptions
+): Promise<RealReportFiles> {
+  const outputDir = resolveEvalOutputDir()
+  const attempts = records.map(record => ({
+    ...record.result,
+    attempt: record.attempt
+  }))
+  const summary = summarizeAttempts(records.map(record => record.result))
+  const chromiumBuild = extractChromiumBuild(options.browserExecutablePath)
+  const metadata = {
+    runner: 'legacy' as const,
+    mode: 'real' as const,
+    gitRevision: gitRevision(),
+    nodeVersion: process.version,
+    osPlatform: platform(),
+    osArch: arch(),
+    osRelease: release(),
+    playwrightVersion: playwrightPackage.version,
+    browserName: options.browserName,
+    browserVersion: options.browserVersion,
+    ...(chromiumBuild === undefined ? {} : { chromiumBuild }),
+    browserPlugin: BROWSER_PLUGIN_STATUS,
+    model: options.model,
+    repetitions: options.repetitions,
+    maxRounds: options.maxRounds,
+    scenarioIds: [...options.scenarioIds],
+    endpoint: safeEndpointForReport(options.endpoint),
+    runId: options.runId,
+    generatedAt: new Date().toISOString()
+  }
+  const stem = `legacy-real-${safeFileComponent(options.model)}-${
+    safeFileComponent(options.runId)
+  }`
+  const files: RealReportFiles = {
+    json: path.join(outputDir, `${stem}-attempts.json`),
+    markdown: path.join(outputDir, `${stem}-summary.md`),
+    exchanges: path.join(outputDir, `${stem}-exchanges.json`)
+  }
+
+  await mkdir(outputDir, { recursive: true })
+  await Promise.all([
+    writeFile(
+      files.json,
+      `${JSON.stringify({ metadata, attempts, summary }, null, 2)}\n`,
+      'utf8'
+    ),
+    writeFile(
+      files.markdown,
+      formatRealMarkdown(records, metadata, summary),
+      'utf8'
+    ),
+    writeFile(
+      files.exchanges,
+      `${JSON.stringify({
+        metadata: {
+          runId: options.runId,
+          model: options.model,
+          maxRounds: options.maxRounds
+        },
+        attempts: options.exchanges
+      }, null, 2)}\n`,
+      'utf8'
+    )
+  ])
+  return files
+}
+
+function formatRealMarkdown(
+  records: readonly RealReportAttempt[],
+  metadata: {
+    readonly runner: 'legacy'
+    readonly mode: 'real'
+    readonly model: string
+    readonly repetitions: number
+    readonly maxRounds: number
+    readonly scenarioIds: readonly string[]
+    readonly endpoint: string
+    readonly runId: string
+    readonly generatedAt: string
+    readonly browserName: string
+    readonly browserVersion: string
+  },
+  summary: ReturnType<typeof summarizeAttempts>
+): string {
+  const summaryMarkdown = formatEvalSummaryMarkdown(summary).replace(
+    '# 网页任务评估摘要',
+    '# 旧 Runtime 真实模型网页任务完成率基线'
+  )
+  const [summaryHeading, ...summaryBody] = summaryMarkdown.split('\n')
+  const environmentRows = [
+    ['Runner', metadata.runner],
+    ['Mode', metadata.mode],
+    ['Model', metadata.model],
+    ['Repetitions', String(metadata.repetitions)],
+    ['Max rounds per attempt', String(metadata.maxRounds)],
+    ['Scenarios', metadata.scenarioIds.join(', ')],
+    ['Endpoint', metadata.endpoint],
+    ['Run ID', metadata.runId],
+    ['Browser name', metadata.browserName],
+    ['Browser version', metadata.browserVersion],
+    ['Generated at', metadata.generatedAt]
+  ].map(([label, value]) => `| ${escapeMarkdownCell(label ?? '')} | ${
+    escapeMarkdownCell(value ?? '')
+  } |`)
+  const attemptRows = records.map(record => {
+    const result = record.result
+    return [
+      result.scenarioId,
+      String(record.attempt),
+      result.model ?? metadata.model,
+      result.category,
+      result.passed ? '通过' : '失败',
+      result.falseSuccess ? '是' : '否',
+      String(result.steps),
+      `${result.durationMs} ms`,
+      result.failureCode ?? '-'
+    ].map(escapeMarkdownCell).join(' | ')
+  })
+
+  return [
+    summaryHeading,
+    '',
+    '## 环境',
+    '',
+    '| 项目 | 值 |',
+    '| --- | --- |',
+    ...environmentRows,
+    '',
+    ...summaryBody,
+    '## 场景明细',
+    '',
+    '| 场景 | Attempt | Model | 类别 | 结果 | 假成功 | 步骤 | 耗时 | 失败分类 |',
+    '| --- | ---: | --- | --- | --- | --- | ---: | ---: | --- |',
+    ...attemptRows.map(row => `| ${row} |`),
+    ''
+  ].join('\n')
+}
+
 function formatLegacyMarkdown(
   attempts: readonly EvalAttempt[],
   metadata: LegacyReportMetadata,
@@ -212,4 +380,20 @@ function extractChromiumBuild(executablePath?: string): string | undefined {
   return executablePath?.match(
     /(?:chromium(?:_headless_shell)?)-(\d+)(?:[/\\]|$)/
   )?.[1]
+}
+
+function safeEndpointForReport(endpoint: string): string {
+  const url = new URL(endpoint)
+  url.username = ''
+  url.password = ''
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+function safeFileComponent(value: string): string {
+  return value
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'unknown'
 }

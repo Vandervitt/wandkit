@@ -1,3 +1,7 @@
+import type {
+  LlmAssistantMessage,
+  LlmClient
+} from '../../../packages/core/src/index'
 import type { EvalAttempt, EvalFailureCode } from '../metrics'
 import { PAGE_AGENT_SCENARIOS } from '../scenarios'
 import { createLegacyDeterministicCase } from './deterministicCases'
@@ -5,15 +9,32 @@ import {
   runLegacyRuntime,
   type LegacyRuntimeResult
 } from './legacyRuntime'
+import {
+  createOpenAICompatibleLlm,
+  OPENAI_COMPATIBLE_MAX_ROUNDS_ERROR_CODE,
+  type OpenAICompatibleExchange
+} from './openAICompatibleLlm'
 import { mountScenario, type MountedScenario } from './scenarioRegistry'
 
 declare global {
   interface Window {
     __WANDKIT_SCENARIO__: MountedScenario
-    __WANDKIT_EVAL__: {
-      runLegacy(scenarioId: string): Promise<EvalAttempt>
-    }
   }
+}
+
+interface WandkitEvalApi {
+  runLegacy(scenarioId: string): Promise<EvalAttempt>
+  runLegacyReal(
+    scenarioId: string,
+    options: { endpoint: string, model: string, maxRounds: number }
+  ): Promise<{
+    attempt: EvalAttempt
+    exchanges: OpenAICompatibleExchange[]
+  }>
+}
+
+const evalWindow = window as unknown as Window & {
+  __WANDKIT_EVAL__: WandkitEvalApi
 }
 
 const appNode = document.querySelector<HTMLElement>('#app')
@@ -26,64 +47,97 @@ const scenarioId =
 let mountedScenario = mountScenario(scenarioId, app)
 window.__WANDKIT_SCENARIO__ = mountedScenario
 
-window.__WANDKIT_EVAL__ = {
+evalWindow.__WANDKIT_EVAL__ = {
   async runLegacy(requestedScenarioId) {
-    const scenario = PAGE_AGENT_SCENARIOS.find(
-      item => item.id === requestedScenarioId
-    )
-    if (!scenario) throw new Error(`未知网页评估场景: ${requestedScenarioId}`)
-
-    if (mountedScenario.id === requestedScenarioId) {
-      mountedScenario.reset()
-    } else {
-      mountedScenario = mountScenario(requestedScenarioId, app)
-      window.__WANDKIT_SCENARIO__ = mountedScenario
-    }
-
     const deterministicCase = createLegacyDeterministicCase(requestedScenarioId)
-    const startedAt = performance.now()
-    let result: LegacyRuntimeResult | undefined
+    return runLegacyEvaluation(requestedScenarioId, {
+      replies: deterministicCase.replies
+    })
+  },
 
-    try {
-      result = await runLegacyRuntime({
-        task: mountedScenario.task,
-        replies: deterministicCase.replies
+  async runLegacyReal(requestedScenarioId, options) {
+    const exchanges: OpenAICompatibleExchange[] = []
+    const llm = createOpenAICompatibleLlm({
+      endpoint: options.endpoint,
+      model: options.model,
+      maxRounds: options.maxRounds,
+      onExchange: exchange => exchanges.push(exchange)
+    })
+    const attempt = await runLegacyEvaluation(
+      requestedScenarioId,
+      { llm },
+      options.model
+    )
+    return { attempt, exchanges }
+  }
+}
+
+interface LegacyEvaluationRuntime {
+  readonly llm?: LlmClient
+  readonly replies?: readonly LlmAssistantMessage[]
+}
+
+async function runLegacyEvaluation(
+  requestedScenarioId: string,
+  runtime: LegacyEvaluationRuntime,
+  model?: string
+): Promise<EvalAttempt> {
+  const scenario = PAGE_AGENT_SCENARIOS.find(
+    item => item.id === requestedScenarioId
+  )
+  if (!scenario) throw new Error(`未知网页评估场景: ${requestedScenarioId}`)
+
+  if (mountedScenario.id === requestedScenarioId) {
+    mountedScenario.reset()
+  } else {
+    mountedScenario = mountScenario(requestedScenarioId, app)
+    window.__WANDKIT_SCENARIO__ = mountedScenario
+  }
+
+  const startedAt = performance.now()
+  let result: LegacyRuntimeResult | undefined
+
+  try {
+    result = await runLegacyRuntime({
+      task: mountedScenario.task,
+      ...runtime
+    })
+    const evaluation = mountedScenario.evaluate(result.answer)
+    const failure = evaluation.passed
+      ? undefined
+      : classifyFailure(
+        requestedScenarioId,
+        result.status,
+        result.stopReason
+      )
+
+    return {
+      scenarioId: scenario.id,
+      category: scenario.category,
+      runner: 'legacy',
+      ...(model === undefined ? {} : { model }),
+      passed: evaluation.passed,
+      falseSuccess: evaluation.falseSuccess,
+      durationMs: Math.round(performance.now() - startedAt),
+      steps: result.steps,
+      ...(failure === undefined ? {} : { failureCode: failure.code }),
+      ...(evaluation.passed ? {} : {
+        failureMessage: failure?.message ??
+          '旧 Runtime 结束后页面未满足场景成功判据。'
       })
-      const evaluation = mountedScenario.evaluate(result.answer)
-      const failure = evaluation.passed
-        ? undefined
-        : classifyFailure(
-          requestedScenarioId,
-          result.status,
-          result.stopReason
-        )
-
-      return {
-        scenarioId: scenario.id,
-        category: scenario.category,
-        runner: 'legacy',
-        passed: evaluation.passed,
-        falseSuccess: evaluation.falseSuccess,
-        durationMs: Math.round(performance.now() - startedAt),
-        steps: result.steps,
-        ...(failure === undefined ? {} : { failureCode: failure.code }),
-        ...(evaluation.passed ? {} : {
-          failureMessage: failure?.message ??
-            '旧 Runtime 结束后页面未满足场景成功判据。'
-        })
-      }
-    } catch (error) {
-      return {
-        scenarioId: scenario.id,
-        category: scenario.category,
-        runner: 'legacy',
-        passed: false,
-        falseSuccess: false,
-        durationMs: Math.round(performance.now() - startedAt),
-        steps: result?.steps ?? 0,
-        failureCode: 'runtime_error',
-        failureMessage: error instanceof Error ? error.message : String(error)
-      }
+    }
+  } catch (error) {
+    return {
+      scenarioId: scenario.id,
+      category: scenario.category,
+      runner: 'legacy',
+      ...(model === undefined ? {} : { model }),
+      passed: false,
+      falseSuccess: false,
+      durationMs: Math.round(performance.now() - startedAt),
+      steps: result?.steps ?? 0,
+      failureCode: 'runtime_error',
+      failureMessage: error instanceof Error ? error.message : String(error)
     }
   }
 }
@@ -99,6 +153,12 @@ function classifyFailure(
   stopReason?: string
 ): FailureClassification {
   if (status !== 'completed') {
+    if (isMaxRoundsFailure(stopReason)) {
+      return {
+        code: 'repeated_action',
+        message: stopReason ?? '真实模型超过单次尝试的轮次预算。'
+      }
+    }
     if (isModelProtocolFailure(stopReason)) {
       return {
         code: 'model_protocol',
@@ -163,6 +223,10 @@ function isModelProtocolFailure(stopReason?: string): boolean {
     return true
   }
   return false
+}
+
+function isMaxRoundsFailure(stopReason?: string): boolean {
+  return stopReason?.includes(OPENAI_COMPATIBLE_MAX_ROUNDS_ERROR_CODE) === true
 }
 
 function currentScenarioRoot(scenarioId: string): HTMLElement | null {

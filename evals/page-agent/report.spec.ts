@@ -15,7 +15,8 @@ import type { EvalAttempt } from './metrics'
 import {
   resolveEvalOutputDir,
   resolvePlaywrightArtifactsDir,
-  writeLegacyReport
+  writeLegacyReport,
+  writeRealReport
 } from './report'
 
 const REPO_ROOT = fileURLToPath(new URL('../../', import.meta.url))
@@ -144,5 +145,94 @@ describe('writeLegacyReport', () => {
     expect(markdown).toContain('| Browser name | chromium\\|nightly |')
     expect(markdown).toContain('| Browser version | 140.0 beta |')
     expect(markdown).toContain('| case\\|one next | read_data |')
+  })
+})
+
+describe('writeRealReport', () => {
+  it('按运行写入带 model、attempt 和总体统计的报告及原始交换', async () => {
+    const relativeOutputDir = `.playwright/real-report-spec-${randomUUID()}`
+    const outputDir = path.join(REPO_ROOT, relativeOutputDir)
+    process.env.PLAYWRIGHT_OUTPUT_DIR = relativeOutputDir
+    cleanupTasks.push(async () => rm(outputDir, { recursive: true, force: true }))
+
+    const files = await writeRealReport([{
+      attempt: 2,
+      result: {
+        scenarioId: 'read-data',
+        category: 'read_data',
+        runner: 'legacy',
+        model: 'vendor/model',
+        passed: true,
+        falseSuccess: false,
+        durationMs: 321,
+        steps: 1
+      }
+    }], {
+      runId: '20260803T120000000Z',
+      model: 'vendor/model',
+      repetitions: 3,
+      maxRounds: 20,
+      scenarioIds: ['read-data'],
+      endpoint: 'http://127.0.0.1:8788/llm/chat?token=must-not-leak',
+      browserName: 'chromium',
+      browserVersion: '140.0',
+      exchanges: [{
+        scenarioId: 'read-data',
+        attempt: 2,
+        exchanges: [{
+          request: {
+            model: 'vendor/model',
+            messages: [{ role: 'user', content: '读取页面' }],
+            tools: [],
+            temperature: 0
+          },
+          response: {
+            status: 200,
+            body: { message: { role: 'assistant', content: '1842' } }
+          }
+        }]
+      }]
+    })
+
+    expect(path.basename(files.json)).toBe(
+      'legacy-real-vendor-model-20260803T120000000Z-attempts.json'
+    )
+    const jsonText = await readFile(files.json, 'utf8')
+    const report = JSON.parse(jsonText) as {
+      metadata: Record<string, unknown>
+      attempts: Array<Record<string, unknown>>
+      summary: { total: number, passed: number, successRate: number }
+    }
+    expect(report.metadata).toMatchObject({
+      runner: 'legacy',
+      mode: 'real',
+      model: 'vendor/model',
+      repetitions: 3,
+      maxRounds: 20,
+      scenarioIds: ['read-data'],
+      endpoint: 'http://127.0.0.1:8788/llm/chat'
+    })
+    expect(report.attempts[0]).toMatchObject({
+      scenarioId: 'read-data',
+      model: 'vendor/model',
+      attempt: 2
+    })
+    expect(report.summary).toMatchObject({
+      total: 1,
+      passed: 1,
+      successRate: 1
+    })
+    expect(jsonText).not.toContain('must-not-leak')
+
+    const markdown = await readFile(files.markdown, 'utf8')
+    expect(markdown).toContain('| Model | vendor/model |')
+    expect(markdown).toContain('| 场景 | Attempt | Model |')
+    expect(markdown).toContain('| read-data | 2 | vendor/model |')
+    expect(markdown).toContain('| 成功率 | 100.00% |')
+
+    const exchangeText = await readFile(files.exchanges, 'utf8')
+    expect(exchangeText).toContain('读取页面')
+    expect(exchangeText).toContain('"attempt": 2')
+    expect(exchangeText).not.toContain('must-not-leak')
   })
 })
