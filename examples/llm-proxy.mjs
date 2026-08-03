@@ -110,6 +110,15 @@ const server = createServer((req, res) => {
       }
 
       const payload = await upstream.json()
+      const upstreamModel = typeof payload.model === 'string'
+        ? payload.model.trim()
+        : ''
+      if (!upstreamModel) {
+        const error = 'LLM 返回结构异常: 缺少实际 model'
+        console.error(`  ✗ ${error}`)
+        res.writeHead(502, { 'Content-Type': 'application/json' })
+        return res.end(JSON.stringify({ error }))
+      }
       const raw = payload.choices?.[0]?.message
       if (!raw) throw new Error('LLM 返回结构异常')
       // 只回传运行时需要的三个字段，不把上游的其余结构泄给前端
@@ -120,7 +129,7 @@ const server = createServer((req, res) => {
       }
       console.log(describe(messages, message))
       res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ model: actualModel, message }))
+      res.end(JSON.stringify({ model: upstreamModel, message }))
     } catch (error) {
       console.error(`  ✗ ${error.message}`)
       res.writeHead(500, { 'Content-Type': 'application/json' })

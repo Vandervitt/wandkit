@@ -30,6 +30,7 @@ describe('examples/llm-proxy.mjs', () => {
         upstreamBodies.push(JSON.parse(Buffer.concat(chunks).toString('utf8')))
         response.writeHead(200, { 'Content-Type': 'application/json' })
         response.end(JSON.stringify({
+          model: 'upstream-actual-model',
           choices: [{ message: { role: 'assistant', content: '完成' } }]
         }))
       })
@@ -64,8 +65,55 @@ describe('examples/llm-proxy.mjs', () => {
     expect(response.status).toBe(200)
     expect(upstreamBodies[0]).toMatchObject({ model: 'requested-model' })
     await expect(response.json()).resolves.toMatchObject({
-      model: 'requested-model',
+      model: 'upstream-actual-model',
       message: { role: 'assistant', content: '完成' }
+    })
+  })
+
+  it.each([
+    ['缺少', undefined],
+    ['空白', '   ']
+  ])('上游成功响应%s实际 model 时返回 502 结构错误', async (
+    _label,
+    upstreamModel
+  ) => {
+    const upstream = createServer((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' })
+      response.end(JSON.stringify({
+        ...(upstreamModel === undefined ? {} : { model: upstreamModel }),
+        choices: [{ message: { role: 'assistant', content: '完成' } }]
+      }))
+    })
+    servers.push(upstream)
+    const upstreamPort = await listen(upstream)
+    const proxyPort = await reservePort()
+    const proxy = spawn(process.execPath, ['examples/llm-proxy.mjs'], {
+      cwd: REPO_ROOT,
+      env: {
+        ...process.env,
+        PORT: String(proxyPort),
+        LLM_BASE_URL: `http://127.0.0.1:${upstreamPort}`,
+        LLM_MODEL: 'proxy-default-model',
+        LLM_API_KEY: 'test-only-key'
+      },
+      stdio: ['pipe', 'pipe', 'pipe']
+    })
+    children.push(proxy)
+    await waitForReady(proxy)
+
+    const response = await fetch(`http://127.0.0.1:${proxyPort}/llm/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'requested-model',
+        messages: [{ role: 'user', content: '测试' }],
+        tools: []
+      })
+    })
+
+    expect(response.status).toBe(502)
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining('LLM 返回结构异常: 缺少实际 model')
     })
   })
 })

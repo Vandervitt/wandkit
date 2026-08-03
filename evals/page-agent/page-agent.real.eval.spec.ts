@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test'
 import type { EvalAttempt } from './metrics'
+import { runRealEvalMatrix } from './realEvalRunner'
 import {
   writeRealReport,
-  type RealReportAttempt,
-  type RealReportExchangeRecord
+  type RealReportOptions
 } from './report'
 import {
   REAL_EVAL_SKIP_REASON,
@@ -33,14 +33,23 @@ test(`真实模型网页基线（${REAL_EVAL_SKIP_REASON}）`, async ({
 
   const { endpoint, model, repetitions, maxRounds, scenarios } =
     resolveRealEvalConfig(process.env)
-  const records: RealReportAttempt[] = []
-  const exchangeRecords: RealReportExchangeRecord[] = []
-  const infrastructureFailures: EvalAttempt[] = []
-
-  attempts: for (const scenario of scenarios) {
-    for (let attemptNumber = 1; attemptNumber <= repetitions; attemptNumber += 1) {
+  const reportOptions: Omit<RealReportOptions, 'exchanges'> = {
+    runId: createRunId(),
+    model,
+    repetitions,
+    maxRounds,
+    scenarioIds: scenarios.map(scenario => scenario.id),
+    endpoint,
+    browserName,
+    browserVersion: browser.version(),
+    browserExecutablePath: browser.browserType().executablePath()
+  }
+  const result = await runRealEvalMatrix({
+    scenarios,
+    repetitions,
+    runAttempt: async ({ scenario }) => {
       await page.goto(`/?scenario=${scenario.id}`)
-      const result = await page.evaluate(async options => {
+      return page.evaluate(async options => {
         const evalApi = (window as unknown as {
           __WANDKIT_EVAL__: RealEvalApi
         }).__WANDKIT_EVAL__
@@ -53,31 +62,16 @@ test(`真实模型网页基线（${REAL_EVAL_SKIP_REASON}）`, async ({
           }
         )
       }, { scenarioId: scenario.id, endpoint, model, maxRounds })
+    },
+    checkpoint: async (records, exchanges) => {
+      await writeRealReport(records, { ...reportOptions, exchanges })
+    },
+    onProgress: message => console.log(`[real-eval] ${message}`)
+  })
 
-      records.push({ attempt: attemptNumber, result: result.attempt })
-      exchangeRecords.push({
-        scenarioId: scenario.id,
-        attempt: attemptNumber,
-        exchanges: result.exchanges
-      })
-      if (isInfrastructureFailure(result.attempt)) {
-        infrastructureFailures.push(result.attempt)
-        break attempts
-      }
-    }
-  }
-
-  const files = await writeRealReport(records, {
-    runId: createRunId(),
-    model,
-    repetitions,
-    maxRounds,
-    scenarioIds: scenarios.map(scenario => scenario.id),
-    endpoint,
-    browserName,
-    browserVersion: browser.version(),
-    browserExecutablePath: browser.browserType().executablePath(),
-    exchanges: exchangeRecords
+  const files = await writeRealReport(result.records, {
+    ...reportOptions,
+    exchanges: result.exchangeRecords
   })
   test.info().annotations.push({
     type: '真实模型报告',
@@ -85,23 +79,19 @@ test(`真实模型网页基线（${REAL_EVAL_SKIP_REASON}）`, async ({
   })
 
   expect(
-    infrastructureFailures,
-    infrastructureFailures.map(attempt =>
+    result.infrastructureFailures,
+    result.infrastructureFailures.map(attempt =>
       `${attempt.scenarioId}: ${attempt.failureMessage ?? '未知代理错误'}`
     ).join('\n')
   ).toEqual([])
-  expect(records).toHaveLength(scenarios.length * repetitions)
-  for (const record of records) {
+  expect(result.records).toHaveLength(scenarios.length * repetitions)
+  for (const record of result.records) {
     expect(record.result).toMatchObject({
       runner: 'legacy',
       model
     })
   }
 })
-
-function isInfrastructureFailure(attempt: EvalAttempt): boolean {
-  return attempt.failureMessage?.includes('OpenAI-compatible 代理') === true
-}
 
 function createRunId(): string {
   return new Date().toISOString().replace(/[-:.]/g, '')

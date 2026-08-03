@@ -27,6 +27,8 @@ export interface OpenAICompatibleLlmOptions {
 
 export const OPENAI_COMPATIBLE_MAX_ROUNDS_ERROR_CODE =
   'PAGE_AGENT_EVAL_REAL_MAX_ROUNDS_EXCEEDED'
+export const PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR =
+  'PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR'
 
 function cloneJson<Value>(value: Value): Value {
   return JSON.parse(JSON.stringify(value)) as Value
@@ -91,6 +93,14 @@ function isAbortError(error: unknown): boolean {
     'name' in error && error.name === 'AbortError'
 }
 
+function errorDetail(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function infrastructureError(message: string): Error {
+  return new Error(`${PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR}: ${message}`)
+}
+
 export function createOpenAICompatibleLlm(
   options: OpenAICompatibleLlmOptions
 ): LlmClient {
@@ -134,31 +144,45 @@ export function createOpenAICompatibleLlm(
         })
       } catch (error) {
         if (isAbortError(error)) throw error
-        const detail = error instanceof Error ? error.message : String(error)
-        throw new Error(`OpenAI-compatible 代理请求失败: ${detail}`)
+        throw infrastructureError(
+          `OpenAI-compatible 代理请求失败: ${errorDetail(error)}`
+        )
       }
 
-      const responseBody = parseResponseBody(await response.text())
+      let responseText: string
+      try {
+        responseText = await response.text()
+      } catch (error) {
+        if (isAbortError(error)) throw error
+        throw infrastructureError(
+          `OpenAI-compatible 代理响应读取失败: ${errorDetail(error)}`
+        )
+      }
+      const responseBody = parseResponseBody(responseText)
       options.onExchange?.({
         request,
         response: { status: response.status, body: responseBody }
       })
 
       if (!response.ok) {
-        throw new Error(
+        throw infrastructureError(
           `OpenAI-compatible 代理 HTTP ${response.status}: ${
             responseErrorDetail(responseBody)
           }`
         )
       }
 
-      if (!isRecord(responseBody) || typeof responseBody.model !== 'string') {
-        throw new Error(
+      if (
+        !isRecord(responseBody) ||
+        typeof responseBody.model !== 'string' ||
+        responseBody.model.trim() === ''
+      ) {
+        throw infrastructureError(
           'OpenAI-compatible 代理返回结构异常: 缺少实际 model'
         )
       }
       if (responseBody.model !== options.model) {
-        throw new Error(
+        throw infrastructureError(
           `OpenAI-compatible 代理模型不一致: 请求 ${options.model}，` +
           `响应 ${responseBody.model}`
         )
@@ -166,7 +190,7 @@ export function createOpenAICompatibleLlm(
 
       const message = assistantMessageFrom(responseBody)
       if (!message) {
-        throw new Error(
+        throw infrastructureError(
           'OpenAI-compatible 代理返回结构异常: 缺少 assistant message'
         )
       }

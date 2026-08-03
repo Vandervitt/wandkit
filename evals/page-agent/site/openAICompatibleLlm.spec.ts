@@ -90,6 +90,21 @@ describe('createOpenAICompatibleLlm', () => {
     }])
   })
 
+  it('代理网络请求失败时使用稳定基础设施 marker', async () => {
+    const llm = createOpenAICompatibleLlm({
+      endpoint,
+      model,
+      fetchImpl: fetchStub(async () => {
+        throw new Error('ECONNREFUSED')
+      })
+    })
+
+    await expect(llm.chat(messages, tools)).rejects.toThrow(
+      'PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR: ' +
+      'OpenAI-compatible 代理请求失败: ECONNREFUSED'
+    )
+  })
+
   it('代理 HTTP 错误会携带状态码和上游原因失败', async () => {
     const exchanges: OpenAICompatibleExchange[] = []
     const llm = createOpenAICompatibleLlm({
@@ -103,6 +118,7 @@ describe('createOpenAICompatibleLlm', () => {
     })
 
     await expect(llm.chat(messages, tools)).rejects.toThrow(
+      'PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR: ' +
       'OpenAI-compatible 代理 HTTP 502: LLM 401: invalid key'
     )
     expect(exchanges[0]?.response).toEqual({
@@ -122,6 +138,7 @@ describe('createOpenAICompatibleLlm', () => {
     })
 
     await expect(llm.chat(messages, tools)).rejects.toThrow(
+      'PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR: ' +
       'OpenAI-compatible 代理返回结构异常: 缺少 assistant message'
     )
   })
@@ -203,7 +220,27 @@ describe('createOpenAICompatibleLlm', () => {
     })
 
     await expect(llm.chat(messages, tools)).rejects.toThrow(
+      'PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR: ' +
       'OpenAI-compatible 代理返回结构异常: 缺少实际 model'
+    )
+  })
+
+  it('读取代理响应 body 失败时使用稳定基础设施 marker', async () => {
+    const llm = createOpenAICompatibleLlm({
+      endpoint,
+      model,
+      fetchImpl: fetchStub(async () => ({
+        ok: true,
+        status: 200,
+        text: async () => {
+          throw new Error('body stream failed')
+        }
+      }) as unknown as Response)
+    })
+
+    await expect(llm.chat(messages, tools)).rejects.toThrow(
+      'PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR: ' +
+      'OpenAI-compatible 代理响应读取失败: body stream failed'
     )
   })
 
@@ -218,6 +255,7 @@ describe('createOpenAICompatibleLlm', () => {
     })
 
     await expect(llm.chat(messages, tools)).rejects.toThrow(
+      'PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR: ' +
       'OpenAI-compatible 代理模型不一致: 请求 test-model，响应 other-model'
     )
   })

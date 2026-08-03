@@ -383,11 +383,15 @@ function gitRevision(): string {
 }
 
 function gitDirty(): boolean {
+  return readGitDirty(REPO_ROOT)
+}
+
+export function readGitDirty(repoRoot: string): boolean {
   return execFileSync(
     'git',
-    ['status', '--porcelain', '--untracked-files=no'],
+    ['status', '--porcelain'],
     {
-      cwd: REPO_ROOT,
+      cwd: repoRoot,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore']
     }

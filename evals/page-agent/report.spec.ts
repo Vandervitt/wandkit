@@ -4,8 +4,10 @@ import {
   readFile,
   rm,
   symlink,
-  unlink
+  unlink,
+  writeFile
 } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
 import { arch, homedir, platform, release, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +15,7 @@ import { randomUUID } from 'node:crypto'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { EvalAttempt } from './metrics'
 import {
+  readGitDirty,
   resolveEvalOutputDir,
   resolvePlaywrightArtifactsDir,
   writeLegacyReport,
@@ -35,6 +38,22 @@ afterEach(async () => {
     process.env.PLAYWRIGHT_OUTPUT_DIR = originalOutputDir
   }
   for (const cleanup of cleanupTasks.splice(0).reverse()) await cleanup()
+})
+
+describe('readGitDirty', () => {
+  it('未跟踪文件会标记仓库 dirty', async () => {
+    const repo = await mkdtemp(path.join(tmpdir(), 'wandkit-git-dirty-'))
+    cleanupTasks.push(async () => rm(repo, { recursive: true, force: true }))
+    execFileSync('git', ['init'], {
+      cwd: repo,
+      stdio: ['ignore', 'ignore', 'ignore']
+    })
+
+    expect(readGitDirty(repo)).toBe(false)
+    await writeFile(path.join(repo, 'untracked.txt'), 'untracked\n', 'utf8')
+
+    expect(readGitDirty(repo)).toBe(true)
+  })
 })
 
 describe('resolveEvalOutputDir', () => {

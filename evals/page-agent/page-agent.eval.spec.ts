@@ -11,6 +11,10 @@ declare global {
     __WANDKIT_SCENARIO__: MountedScenario
     __WANDKIT_EVAL__: {
       runLegacy(scenarioId: string): Promise<EvalAttempt>
+      runLegacyReal(
+        scenarioId: string,
+        options: { endpoint: string, model: string, maxRounds: number }
+      ): Promise<{ attempt: EvalAttempt }>
     }
   }
 }
@@ -187,5 +191,82 @@ test('最终判据异常时保留 Runtime 已发生的动作步骤', async ({ pa
     steps: 1,
     failureCode: 'runtime_error',
     failureMessage: 'evaluate failed after runtime'
+  })
+})
+
+test('DOM 已成功但 Runtime 随后失败时 attempt 仍为失败', async ({
+  page
+}) => {
+  const endpoint = 'http://127.0.0.1:18791/llm/chat'
+  const replies = [
+    {
+      model: 'test-model',
+      message: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{
+          id: 'read-page',
+          type: 'function',
+          function: { name: 'page_read_v1', arguments: '{}' }
+        }]
+      }
+    },
+    {
+      model: 'test-model',
+      message: {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{
+          id: 'open-cdr',
+          type: 'function',
+          function: { name: 'page_click_v1', arguments: '{"index":0}' }
+        }]
+      }
+    }
+  ]
+  let requestNumber = 0
+
+  await page.route(`${endpoint}*`, async route => {
+    if (route.request().method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Headers': 'Content-Type',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS'
+        }
+      })
+      return
+    }
+    const reply = replies[requestNumber]
+    requestNumber += 1
+    await route.fulfill({
+      status: reply === undefined ? 502 : 200,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(reply ?? { error: 'simulated upstream failure' })
+    })
+  })
+  await page.goto('/?scenario=navigation')
+
+  const result = await page.evaluate(async options => {
+    return window.__WANDKIT_EVAL__.runLegacyReal(
+      'navigation',
+      options
+    )
+  }, { endpoint, model: 'test-model', maxRounds: 5 })
+
+  expect(await page.locator('h1').textContent()).toBe('话单查询')
+  expect(result.attempt).toMatchObject({
+    scenarioId: 'navigation',
+    passed: false,
+    falseSuccess: false,
+    steps: 2,
+    failureCode: 'runtime_error',
+    failureMessage: expect.stringContaining(
+      'PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR'
+    )
   })
 })

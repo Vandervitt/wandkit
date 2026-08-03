@@ -12,6 +12,7 @@ import {
 import {
   createOpenAICompatibleLlm,
   OPENAI_COMPATIBLE_MAX_ROUNDS_ERROR_CODE,
+  PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR,
   type OpenAICompatibleExchange
 } from './openAICompatibleLlm'
 import { mountScenario, type MountedScenario } from './scenarioRegistry'
@@ -103,7 +104,8 @@ async function runLegacyEvaluation(
       ...runtime
     })
     const evaluation = mountedScenario.evaluate(result.answer)
-    const failure = evaluation.passed
+    const passed = result.status === 'completed' && evaluation.passed
+    const failure = passed
       ? undefined
       : classifyFailure(
         requestedScenarioId,
@@ -116,12 +118,12 @@ async function runLegacyEvaluation(
       category: scenario.category,
       runner: 'legacy',
       ...(model === undefined ? {} : { model }),
-      passed: evaluation.passed,
+      passed,
       falseSuccess: evaluation.falseSuccess,
       durationMs: Math.round(performance.now() - startedAt),
       steps: result.steps,
       ...(failure === undefined ? {} : { failureCode: failure.code }),
-      ...(evaluation.passed ? {} : {
+      ...(passed ? {} : {
         failureMessage: failure?.message ??
           '旧 Runtime 结束后页面未满足场景成功判据。'
       })
@@ -236,7 +238,7 @@ function isMaxRoundsFailure(stopReason?: string): boolean {
 }
 
 function isProxyInfrastructureFailure(stopReason?: string): boolean {
-  return stopReason?.includes('OpenAI-compatible 代理') === true
+  return stopReason?.includes(PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR) === true
 }
 
 function currentScenarioRoot(scenarioId: string): HTMLElement | null {
