@@ -78,7 +78,7 @@ npx playwright test --config evals/page-agent/playwright.config.ts page-agent.re
 | --- | --- | --- |
 | 配置提取与 endpoint/model/成本门禁 | `npx vitest run evals/page-agent/realEvalConfig.spec.ts` 因缺少 `./realEvalConfig` 失败 | 20 / 20 通过 |
 | 客户端实际 model 校验 | 响应缺 model 或 model 不一致时错误地 resolve | `openAICompatibleLlm.spec.ts` 8 / 8 通过 |
-| 本地代理 model 契约 | 上游仍收到 `proxy-default-model`，未使用请求的 `requested-model` | `llm-proxy.spec.ts` 1 / 1 通过；代理使用并回传请求 model |
+| 本地代理 model 契约 | 上游仍收到 `proxy-default-model`，未使用请求的 `requested-model` | 当时的 1 / 1 用例证明代理使用请求 model 调上游，但只验证了 model 回显；该 provenance 缺口已在 2.4 修正 |
 | 报告 provenance | `report.spec.ts` 中 real metadata 缺少 `gitDirty` | `report.spec.ts` 13 / 13 通过；JSON 记录 revision 和 tracked dirty 状态 |
 | model mismatch Playwright 门禁 | 临时代理回传 `other-model` 时 Playwright 意外退出 0 | 代理错误优先归类 `runtime_error`，相同负向用例退出 1 |
 
@@ -96,6 +96,22 @@ npx vitest run \
 
 结果：8 个测试文件、94 / 94 通过。
 
+### 2.4 真实模型基线可信度加固
+
+质量复审发现，上述 94 个测试仍未证明“代理回传的 model 来自上游”，
+且 Runtime 失败、基础设施分类和长运行中间结果都存在可信度缺口。
+本轮继续严格按 RED → GREEN 修正：
+
+| 修正项 | RED | GREEN |
+| --- | --- | --- |
+| 实际 model provenance | `llm-proxy.spec.ts` 中上游返回 `upstream-actual-model`，代理仍回显 `requested-model`；上游缺 model 仍返回 200 | 3 / 3 通过；代理使用请求 model 调上游，但响应 model 只取上游 `payload.model`；缺失/空白返回 502 结构错误 |
+| Runtime 终态不得被 DOM 成功掩盖 | navigation DOM 已成功后模拟代理 502，attempt 错误地 `passed: true` 且无 failureCode | Playwright 回归 1 / 1 通过；只有 Runtime `completed` 且页面判据成功才记为通过，失败 attempt 保留 2 steps 和 DOM 结果 |
+| 稳定基础设施 marker | 网络、HTTP、body stream、结构和 model 错误都只有中文文案；`response.text()` 异常原样抛出 `body stream failed` | `openAICompatibleLlm.spec.ts` 10 / 10 通过；上述错误统一携带 `PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR`，real gate 只按 marker 判定；`AbortError` 仍保持原类型 |
+| 逐 attempt checkpoint | `realEvalRunner.spec.ts` 首次运行因缺少 `./realEvalRunner` 失败 | 2 / 2 通过；第 N+1 条抛错时，前 N 条已按同一 runId 逐次 checkpoint；基础设施失败 attempt 也先写入再停止 |
+| untracked provenance | `readGitDirty` 回归首次失败：方法不存在 | `report.spec.ts` 14 / 14 通过；使用正常 `git status --porcelain`，untracked 会标记 dirty，ignored `.playwright/` 不计入 |
+
+合并回归结果：9 个测试文件、101 / 101 通过。
+
 ## 3. 失败路径门禁
 
 | 场景 | 结果 |
@@ -107,9 +123,11 @@ npx vitest run \
 | 场景过滤包含 `unknown-case` | 退出码 1，明确列出未知 ID |
 | endpoint 为远程 host | 退出码 1，提示只允许 loopback 本机代理 |
 | 显式空白 model | 退出码 1，不回退到 `LLM_MODEL` |
-| 代理端点指向不可达本地端口 | 退出码 1，显示 `OpenAI-compatible 代理请求失败: Failed to fetch` |
-| 临时本地代理模拟 HTTP 502 / 上游 401 | 退出码 1，显示 `OpenAI-compatible 代理 HTTP 502: LLM 401: simulated invalid key`；临时服务随后已停止 |
-| 代理响应 model 与请求不一致 | 退出码 1，明确列出请求 model 与响应 model |
+| 代理端点指向不可达本地端口 | 退出码 1，错误携带 `PAGE_AGENT_EVAL_REAL_INFRASTRUCTURE_ERROR` 及 `OpenAI-compatible 代理请求失败` |
+| 临时本地代理模拟 HTTP 502 / 上游 401 | 退出码 1，错误携带稳定 marker、HTTP 502 和上游 401 原因；临时服务随后已停止 |
+| 代理响应 model 与请求不一致 | 退出码 1，稳定 marker 后明确列出请求 model 与上游实际 model |
+| 代理成功响应缺失/空白 `payload.model` | 代理返回 502 和 `LLM 返回结构异常: 缺少实际 model` |
+| 代理响应 body stream 读取失败 | 错误携带稳定 marker 和底层 stream 原因 |
 
 上述代理错误均先写入 ignored `.playwright` 报告，再由 Playwright 断言失败，
 不会 skip 或当作通过。
@@ -143,9 +161,12 @@ attempts 会耗尽 Playwright 30 分钟总预算。修复只作用于真实评�
 
 ## 5. 最终真实模型全矩阵
 
+> 上一版 `204a0b9e8251a62bef6b7b945cb85a097b5f73bc` 报告使用的代理只回显请求
+> model，无法证明上游实际 model，因此已被本节新报告取代，不再作为最终基线。
+
 为不停止或重启用户已有的 8788 代理，本轮使用更新后的
 `examples/llm-proxy.mjs` 启动独立临时代理。8789 已被既有 scratchpad
-进程占用，因此选用经确认空闲的 8790；本轮进程 PID 为 `23054`，
+进程占用，因此选用经确认空闲的 8790；本轮进程 PID 为 `43379`，
 评估后已停止并确认端口释放。
 
 smoke 命令：
@@ -160,7 +181,9 @@ npx playwright test --config evals/page-agent/playwright.config.ts \
   page-agent.real.eval.spec.ts
 ```
 
-结果：退出码 0，`1 passed (6.3s)`。
+结果：退出码 0，`1 passed (4.4s)`，并输出
+`[real-eval] read-data attempt 1/1 checkpointed`。若上游 `payload.model`
+不是 `glm-4-flash`，客户端会立即以稳定基础设施 marker 失败。
 
 全矩阵命令：
 
@@ -170,24 +193,27 @@ PAGE_AGENT_EVAL_REAL_MODEL=glm-4-flash \
 npm run eval:page-agent:real
 ```
 
-结果：退出码 0，`1 passed (2.9m)`。
+结果：退出码 0，30 条 checkpoint 进度均可见，
+`1 passed (3.7m)`。
 
 报告：
 
-- `.playwright/网页任务完成率基线-20260802/legacy-real-glm-4-flash-20260803T052609292Z-attempts.json`
-- `.playwright/网页任务完成率基线-20260802/legacy-real-glm-4-flash-20260803T052609292Z-summary.md`
-- `.playwright/网页任务完成率基线-20260802/legacy-real-glm-4-flash-20260803T052609292Z-exchanges.json`
+- `.playwright/网页任务完成率基线-20260802/legacy-real-glm-4-flash-20260803T062044439Z-attempts.json`
+- `.playwright/网页任务完成率基线-20260802/legacy-real-glm-4-flash-20260803T062044439Z-summary.md`
+- `.playwright/网页任务完成率基线-20260802/legacy-real-glm-4-flash-20260803T062044439Z-exchanges.json`
 
 provenance 核对：
 
 | 项目 | 结果 |
 | --- | --- |
-| 代码 revision | `204a0b9e8251a62bef6b7b945cb85a097b5f73bc` |
+| 代码 revision | `d7fa5e1318caf9fa94ef02a60bf473e36bb059a3` |
 | Git dirty | `false` |
 | 实际 model | `glm-4-flash` |
 | endpoint | `http://127.0.0.1:8790/llm/chat` |
 | 场景 / attempts | 10 个场景，每场景 3 次，总计 30 |
-| 原始交换 | 30 个 attempt 记录、130 次交换；请求与响应 model 均为 `glm-4-flash`，HTTP 状态均为 200 |
+| 原始交换 | 30 个 attempt 记录、143 次交换；请求 model 与上游响应 `payload.model` 均为 `glm-4-flash`，HTTP 状态均为 200 |
+| model 来源证据 | 代理回应直接取自上游 `payload.model`；单测使用与请求不同的 `upstream-actual-model` 证明不是回显 |
+| checkpoint | 每个 attempt 完成后以同一 runId 覆盖写入 attempts/summary/exchanges，最终共 30 条 |
 
 最终 HEAD 会比上述报告 revision 多一个仅更新本文档的提交；
 真实评估对应的代码内容仍由上述 revision 唯一标识。
@@ -200,11 +226,11 @@ provenance 核对：
 | 场景数 | 10 |
 | 每场景 attempts | 3 |
 | 总 attempts | 30 |
-| 通过 | 20 |
-| 成功率 | 66.67% |
+| 通过 | 19 |
+| 成功率 | 63.33% |
 | 假成功率 | 0.00% |
-| P50 / P95 steps | 3 / 6 |
-| P50 / P95 耗时 | 4884 / 8328 ms |
+| P50 / P95 steps | 3 / 20 |
+| P50 / P95 耗时 | 6226 / 27022 ms |
 
 分类结果：
 
@@ -217,7 +243,7 @@ provenance 核对：
 | `composite_select` | 3 / 3 | 100.00% | - |
 | `rich_text` | 0 / 3 | 0.00% | `unsupported_control` |
 | `validation_recovery` | 0 / 3 | 0.00% | `task_incomplete` |
-| `async_loading` | 2 / 3 | 66.67% | 1 次 `repeated_action`（20 steps） |
+| `async_loading` | 1 / 3 | 33.33% | 2 次 `repeated_action`（各 20 steps） |
 | `ask_user` | 3 / 3 | 100.00% | - |
 | `dynamic_dom` | 0 / 3 | 0.00% | `task_incomplete` |
 
@@ -225,17 +251,17 @@ provenance 核对：
 
 | 命令 | 结果 |
 | --- | --- |
-| `npx vitest run evals/page-agent/metrics.spec.ts evals/page-agent/report.spec.ts evals/page-agent/scenarios.spec.ts evals/page-agent/realEvalConfig.spec.ts evals/page-agent/llm-proxy.spec.ts evals/page-agent/site/*.spec.ts` | 94 / 94 通过 |
+| `npx vitest run evals/page-agent/metrics.spec.ts evals/page-agent/report.spec.ts evals/page-agent/scenarios.spec.ts evals/page-agent/realEvalConfig.spec.ts evals/page-agent/realEvalRunner.spec.ts evals/page-agent/llm-proxy.spec.ts evals/page-agent/site/*.spec.ts` | 101 / 101 通过 |
 | `npm run typecheck` | 各 workspace 与 page-agent tsconfig 均退出码 0 |
-| `npm run eval:page-agent` | 2 / 2 通过，只运行确定性 spec |
+| `npm run eval:page-agent` | 3 / 3 通过，含“DOM 已成功但 Runtime 失败”回归 |
 | `npx playwright test --config evals/page-agent/playwright.config.ts page-agent.real.eval.spec.ts` | 未启用时 `1 skipped`，启用提示可见 |
-| 8790 `read-data × 1` 真实 smoke | `1 passed (6.3s)`，退出码 0 |
-| 8790 `npm run eval:page-agent:real` | 30 attempts 完成，`1 passed (2.9m)`，退出码 0 |
+| 8790 `read-data × 1` 真实 smoke | `1 passed (4.4s)`，上游实际 model 校验通过 |
+| 8790 `npm run eval:page-agent:real` | 30 attempts 完成且逐条 checkpoint，`1 passed (3.7m)`，退出码 0 |
 
 ## 7. 已知限制
 
-- 30 attempts 当前封装在一个 Playwright test 内，line reporter 不显示逐场景进度；失败
-  时可从 trace 定位，但实时可观测性有限。
+- 30 attempts 仍封装在一个 Playwright test 内，但已在每个 attempt checkpoint
+  成功后输出进度；报告采用同一 runId 覆盖写入，本任务不扩展处理跨进程原子写入。
 - 默认 20 轮是 eval-only 安全预算，防止模型循环耗尽总超时；确有更长任务时可通过
   `PAGE_AGENT_EVAL_REAL_MAX_ROUNDS` 显式覆盖。
 - Task 7 会继续执行完整集成审查、最终门禁并补充本文件；本文件不提前声明 Task 7 完成。
