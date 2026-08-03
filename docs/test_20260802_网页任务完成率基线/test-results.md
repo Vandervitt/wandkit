@@ -2,7 +2,7 @@
 
 > 分支：`test_20260802_网页任务完成率基线`
 > 日期：2026-08-03
-> 范围：Task 6 可选真实模型基线规格修正与复验；Task 7 最终门禁尚未执行
+> 范围：Task 6 可选真实模型基线规格修正与复验；Task 7 集成审查与最终门禁
 
 ## 1. 真实模型运行配置
 
@@ -261,7 +261,109 @@ provenance 核对：
 ## 7. 已知限制
 
 - 30 attempts 仍封装在一个 Playwright test 内，但已在每个 attempt checkpoint
-  成功后输出进度；报告采用同一 runId 覆盖写入，本任务不扩展处理跨进程原子写入。
+  成功后输出进度；报告采用同一 runId 覆盖写入，跨进程同名写入没有锁，单文件
+  覆盖也不是原子 rename，本任务不扩展处理该一致性风险。
 - 默认 20 轮是 eval-only 安全预算，防止模型循环耗尽总超时；确有更长任务时可通过
-  `PAGE_AGENT_EVAL_REAL_MAX_ROUNDS` 显式覆盖。
-- Task 7 会继续执行完整集成审查、最终门禁并补充本文件；本文件不提前声明 Task 7 完成。
+  `PAGE_AGENT_EVAL_REAL_MAX_ROUNDS` 显式覆盖，但最大值仍为 100。
+- `PAGE_AGENT_EVAL_REAL_ATTEMPTS` 是 eval-only 成本门禁，每场景最多 20 次；更大样本
+  需要改代码或分批运行。
+- 真实模型结果不是固定 golden；引用结果时必须同时绑定 runId、revision、model、
+  endpoint 和原始交换。
+- 报告记录 `Browser plugin not available`；本基线未覆盖 Browser plugin 的能力差异。
+
+## 8. Task 7 集成审查与最终门禁
+
+### 8.1 基线、分支与端口
+
+默认基线由 `origin/HEAD` 确认为 `origin/main`；本地 `main` 与本分支 merge-base 均为
+`b1ed88fab1c2042e0b711a2fba1a10f83d598b73`。本轮开始时：
+
+| 项目 | 结果 |
+| --- | --- |
+| 分支 | `test_20260802_网页任务完成率基线` |
+| 代码 HEAD | `ee5cbe5987f125f4830239b3b0b83f93cfeeeb72` |
+| 工作区 | clean |
+| 4173 | 未监听 |
+| 8788 | 用户既有 node PID `69376` 监听，未停止或重启 |
+| 8789 | 用户既有 node PID `22720` 监听，未停止或重启 |
+| 8790 | 未监听 |
+
+`npm run eval:page-agent` 后再次检查，4173 和 8790 均未监听，说明本轮自启 Vite
+已由 Playwright 停止；8788、8789 的 PID 与运行前一致。`npm run verify` 和文档更新前
+的最终端口检查结果相同。
+
+### 8.2 集成映射证据
+
+计划原命令：
+
+```bash
+rg -n "read-data|navigation|search-filter|form|composite-select|rich-text|validation-recovery|async-loading|ask-user|dynamic-dom" evals/page-agent
+```
+
+退出码 0，共匹配 162 行。随后使用只读 TypeScript AST 审计分别抽取：
+
+- `PAGE_AGENT_SCENARIOS` 的 10 个 ID 与 `id → category`；
+- `scenarioDefinitions` 的 10 个 key；
+- `createLegacyDeterministicCase` switch 的 10 个 case；
+- `EXPECTED_OUTCOMES` 的 10 个 key；
+- real 默认配置对 `PAGE_AGENT_SCENARIOS` 的复用；
+- 报告对 `EVAL_CATEGORIES` 的逐类输出。
+
+集合、唯一性和顺序检查全部为 true，映射为：
+
+```text
+read-data=>read_data
+navigation=>navigation
+search-filter=>search_filter
+form=>form
+composite-select=>composite_select
+rich-text=>rich_text
+validation-recovery=>validation_recovery
+async-loading=>async_loading
+ask-user=>ask_user
+dynamic-dom=>dynamic_dom
+```
+
+辅助审计的首个 Node 22 运行方式因无法解析 TypeScript 源码中的无扩展名导入而
+退出 1；改为不加载项目模块的纯 AST 审计后退出 0。该失败属于一次性审计命令的
+loader 选择，不是项目测试或映射缺口。
+
+### 8.3 新鲜验证结果
+
+| 命令 | 退出码 | 结果 |
+| --- | ---: | --- |
+| `npx vitest run evals/page-agent/**/*.spec.ts` | 0 | shell 只展开到 `site/*.spec.ts`：3 个测试文件、49 / 49 通过 |
+| `npx vitest run evals/page-agent` | 0 | 补齐根层用例：9 个测试文件、101 / 101 通过 |
+| `npm run eval:page-agent` | 0 | 3 / 3 Playwright 测试通过，耗时 9.2s；确定性报告 8 / 10，假成功 2 / 10 |
+| `npm run verify` | 0 | 57 个测试文件、828 / 828 通过；各 workspace 与 page-agent 类型检查通过；全部 workspace build 通过 |
+| `git diff --check` | 0 | Task 7 文档更新后无空白错误 |
+| `git diff --check main..HEAD` | 0 | 分支已提交代码相对默认基线无空白错误 |
+| `npm ls @playwright/test vite --depth=0` | 0 | 直接依赖为 `@playwright/test@1.55.1`、`vite@5.4.21` |
+| `git ls-files '.playwright/**'` | 0 | 无输出，ignored 报告、截图和 trace 未进入 Git |
+
+`npm run verify` 的测试阶段出现三条 jsdom
+`Not implemented: HTMLFormElement's requestSubmit() method` stderr；对应
+`packages/executor/src/tools.spec.ts` 用例仍通过，最终退出码为 0。
+
+### 8.4 基线报告复核
+
+本轮新生成的 deterministic 报告 metadata 记录代码 revision 为 `ee5cbe5`、
+`gitDirty=false`、Chromium `140.0.7339.186`，结果为 8 / 10。
+
+真实全矩阵不重复运行，复核可信 runId `20260803T062044439Z`：
+
+| 项目 | 复核结果 |
+| --- | --- |
+| revision / dirty | `d7fa5e1318caf9fa94ef02a60bf473e36bb059a3` / `false` |
+| attempts | 10 个场景各 3 次，共 30 条 |
+| 通过 | 19 / 30，成功率 63.33%，假成功率 0.00% |
+| 交换 | 30 个 attempt 记录、143 次交换 |
+| model / HTTP | 请求与上游响应 model 均为 `glm-4-flash`；HTTP 状态均为 200 |
+| Browser plugin | `Browser plugin not available` |
+
+### 8.5 最终提交关系
+
+Task 7 未发现需要修改代码的集成 bug；本轮提交只包含 `review.md` 和本文档。
+提交前代码 HEAD 为 `ee5cbe5987f125f4830239b3b0b83f93cfeeeb72`，Task 7 文档提交是其
+直接子提交，不改变真实报告对应的 `d7fa5e1` 代码内容，也不重跑真实 10 × 3 矩阵。
+同一提交无法在自身内容中稳定记录自己的 SHA，最终提交 SHA 在交付回报中列出。
