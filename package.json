@@ -11,6 +11,7 @@
     "build": "npm run build --workspaces --if-present",
     "test": "vitest run",
     "test:watch": "vitest",
+    "preeval:page-agent": "playwright install chromium",
     "eval:page-agent": "playwright test --config evals/page-agent/playwright.config.ts",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc --noEmit -p evals/page-agent/tsconfig.json",
     "verify": "npm run test && npm run typecheck && npm run build",

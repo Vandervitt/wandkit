@@ -1,11 +1,8 @@
 import type { LlmAssistantMessage } from '../../../packages/core/src/index'
-import type { EvalFailureCode } from '../metrics'
 import { finalAnswer, toolCall } from './scriptedLlm'
 
 export interface LegacyDeterministicCase {
   readonly replies: readonly LlmAssistantMessage[]
-  readonly failureCode?: EvalFailureCode
-  readonly failureMessage?: string
 }
 
 export function createLegacyDeterministicCase(
@@ -60,10 +57,9 @@ export function createLegacyDeterministicCase(
         replies: [
           toolCall('page_read_v1', {}),
           toolCall('page_input_v1', { index: 0, text: '季度总结' }),
-          finalAnswer('当前页面工具无法可靠填写公告富文本正文。')
-        ],
-        failureCode: 'unsupported_control',
-        failureMessage: '旧 Runtime 的页面输入工具不能可靠写入 contenteditable 富文本控件。'
+          toolCall('page_click_v1', { index: 1 }),
+          finalAnswer('季度总结已写入并保存到公告正文。')
+        ]
       }
     case 'validation-recovery':
       return {
@@ -81,10 +77,10 @@ export function createLegacyDeterministicCase(
         replies: [
           toolCall('page_read_v1', {}),
           toolCall('page_click_v1', { index: 0 }),
-          finalAnswer('日志仍在加载，尚未读取到最终总数。')
-        ],
-        failureCode: 'waiting_timeout',
-        failureMessage: '旧 Runtime 没有等待原语，动作后的稳定快照早于异步数据完成。'
+          toolCall('page_wait_v1', { text: '共 27 条', timeoutMs: 2000 }),
+          toolCall('page_read_v1', {}),
+          finalAnswer('操作日志共 27 条。')
+        ]
       }
     case 'ask-user':
       return {

@@ -1,7 +1,10 @@
 import type { EvalAttempt, EvalFailureCode } from '../metrics'
 import { PAGE_AGENT_SCENARIOS } from '../scenarios'
 import { createLegacyDeterministicCase } from './deterministicCases'
-import { runLegacyRuntime } from './legacyRuntime'
+import {
+  runLegacyRuntime,
+  type LegacyRuntimeResult
+} from './legacyRuntime'
 import { mountScenario, type MountedScenario } from './scenarioRegistry'
 
 declare global {
@@ -13,8 +16,9 @@ declare global {
   }
 }
 
-const app = document.querySelector<HTMLElement>('#app')
-if (!app) throw new Error('找不到网页评估站点挂载节点 #app')
+const appNode = document.querySelector<HTMLElement>('#app')
+if (!appNode) throw new Error('找不到网页评估站点挂载节点 #app')
+const app = appNode
 
 const scenarioId =
   new URLSearchParams(window.location.search).get('scenario') ?? 'read-data'
@@ -38,16 +42,18 @@ window.__WANDKIT_EVAL__ = {
 
     const deterministicCase = createLegacyDeterministicCase(requestedScenarioId)
     const startedAt = performance.now()
+    let result: LegacyRuntimeResult | undefined
 
     try {
-      const result = await runLegacyRuntime({
+      result = await runLegacyRuntime({
         task: mountedScenario.task,
         replies: deterministicCase.replies
       })
       const evaluation = mountedScenario.evaluate(result.answer)
-      const failureCode = evaluation.passed
+      const failure = evaluation.passed
         ? undefined
-        : deterministicCase.failureCode ?? classifyRuntimeFailure(
+        : classifyFailure(
+          requestedScenarioId,
           result.status,
           result.stopReason
         )
@@ -60,10 +66,10 @@ window.__WANDKIT_EVAL__ = {
         falseSuccess: evaluation.falseSuccess,
         durationMs: Math.round(performance.now() - startedAt),
         steps: result.steps,
-        ...(failureCode === undefined ? {} : { failureCode }),
+        ...(failure === undefined ? {} : { failureCode: failure.code }),
         ...(evaluation.passed ? {} : {
-          failureMessage: deterministicCase.failureMessage ??
-            result.stopReason ?? '旧 Runtime 结束后页面未满足场景成功判据。'
+          failureMessage: failure?.message ??
+            '旧 Runtime 结束后页面未满足场景成功判据。'
         })
       }
     } catch (error) {
@@ -74,7 +80,7 @@ window.__WANDKIT_EVAL__ = {
         passed: false,
         falseSuccess: false,
         durationMs: Math.round(performance.now() - startedAt),
-        steps: 0,
+        steps: result?.steps ?? 0,
         failureCode: 'runtime_error',
         failureMessage: error instanceof Error ? error.message : String(error)
       }
@@ -82,16 +88,84 @@ window.__WANDKIT_EVAL__ = {
   }
 }
 
-function classifyRuntimeFailure(
-  status: 'completed' | 'failed' | 'cancelled' | 'awaiting_confirmation',
+interface FailureClassification {
+  readonly code: EvalFailureCode
+  readonly message: string
+}
+
+function classifyFailure(
+  scenarioId: string,
+  status: LegacyRuntimeResult['status'],
   stopReason?: string
-): EvalFailureCode {
-  if (status === 'completed') return 'task_incomplete'
+): FailureClassification {
+  if (status !== 'completed') {
+    if (isModelProtocolFailure(stopReason)) {
+      return {
+        code: 'model_protocol',
+        message: stopReason ?? '模型响应未满足旧 Runtime 协议。'
+      }
+    }
+    return {
+      code: 'runtime_error',
+      message: stopReason ?? `旧 Runtime 以 ${status} 状态结束。`
+    }
+  }
+
+  const evalRoot = currentScenarioRoot(scenarioId)
+  if (scenarioId === 'rich-text') {
+    const editorText = evalRoot
+      ?.querySelector<HTMLElement>('[contenteditable="true"]')
+      ?.textContent
+    if (editorText !== '季度总结') {
+      return {
+        code: 'unsupported_control',
+        message: '页面输入动作未写入 contenteditable 富文本正文。'
+      }
+    }
+    if (
+      evalRoot?.querySelector('[data-saved-content]')?.textContent !== '季度总结'
+    ) {
+      return {
+        code: 'action_no_effect',
+        message: '富文本正文已写入，但保存动作未更新已保存内容。'
+      }
+    }
+  }
+
+  if (scenarioId === 'async-loading') {
+    const loadingStatus = evalRoot
+      ?.querySelector('[data-log-status]')
+      ?.textContent
+      ?.trim()
+    if (
+      loadingStatus === '加载中' ||
+      evalRoot?.querySelector('[data-log-total="27"]') === null
+    ) {
+      return {
+        code: 'waiting_timeout',
+        message: '旧 Runtime 尝试等待后，操作日志仍未完成异步加载。'
+      }
+    }
+  }
+
+  return {
+    code: 'task_incomplete',
+    message: '旧 Runtime 结束后页面未满足场景成功判据。'
+  }
+}
+
+function isModelProtocolFailure(stopReason?: string): boolean {
   if (
     stopReason &&
-    /(?:model|tool arguments|tool call|JSON|Schema)/i.test(stopReason)
+    /(?:model|tool arguments|tool call|JSON|Schema|LLM replies exhausted)/i
+      .test(stopReason)
   ) {
-    return 'model_protocol'
+    return true
   }
-  return 'runtime_error'
+  return false
+}
+
+function currentScenarioRoot(scenarioId: string): HTMLElement | null {
+  const evalRoot = app.querySelector<HTMLElement>('[data-eval-root]')
+  return evalRoot?.dataset.scenario === scenarioId ? evalRoot : null
 }
