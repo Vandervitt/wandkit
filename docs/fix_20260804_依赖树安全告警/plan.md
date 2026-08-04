@@ -195,7 +195,7 @@ git branch --show-current
 Expected: 当前分支为 `fix_20260804_依赖树安全告警`；变更仅限本计划列出的目标文件；
 无格式错误。
 
-- [ ] **Step 4：分组提交**
+- [x] **Step 4：分组提交**
 
 每次 `git add` 和 `git commit` 前重新运行 `git branch --show-current`。
 
