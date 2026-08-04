@@ -1,3 +1,5 @@
+import type { RunDeadlinePhase } from './deadline'
+
 /**
  * Run 所处的生命周期位置。
  *
@@ -32,8 +34,41 @@ export interface RunState {
   status: RunStatus
 }
 
+export interface TaskOutcomeError {
+  code: string
+  message: string
+  /** 宿主是否可以安全地自动重放整个任务。 */
+  retryable: boolean
+}
+
+export interface TaskTimeout extends TaskOutcomeError {
+  code: 'RUN_DEADLINE_EXCEEDED'
+  phase: RunDeadlinePhase
+  budgetMs: number
+  activeElapsedMs: number
+  writeState?: 'committed' | 'unknown'
+}
+
+export interface TaskFailure extends TaskOutcomeError {
+  code:
+    | 'MAX_ROUNDS_REACHED'
+    | 'MAX_TOOL_CALLS_REACHED'
+    | 'TOOL_FAILED'
+    | 'RUNTIME_FAILED'
+  writeState?: 'committed' | 'unknown'
+}
+
+export type TaskOutcome =
+  | { kind: 'completed' }
+  | { kind: 'needs_input' }
+  | { kind: 'cancelled', reason: 'user_stopped' }
+  | { kind: 'timed_out', error: TaskTimeout }
+  | { kind: 'failed', error: TaskFailure }
+
 /** Run 的不可变视图，每次状态迁移都会发布给宿主。 */
 export interface RunSnapshot extends RunState {
   runId: string
   traceId: string
+  /** 新 Runtime 只在终态提供；可选是为了兼容旧 Runtime。 */
+  outcome?: TaskOutcome
 }

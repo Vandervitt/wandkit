@@ -5,7 +5,12 @@
  */
 export { FakeLlm } from './fakeLlm'
 export { evaluateTrace } from './evalSuite'
-export type { EvalCase, EvalResult, EvalIssue } from './evalSuite'
+export type {
+  EvalCase,
+  EvalResult,
+  EvalIssue,
+  ExpectedTaskOutcome
+} from './evalSuite'
 export { collectModuleContractIssues } from './moduleContract'
 
 /**

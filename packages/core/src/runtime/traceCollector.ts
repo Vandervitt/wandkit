@@ -1,4 +1,5 @@
-import type { RunStatus } from '../contracts/run'
+import type { RunDeadlinePhase } from '../contracts/deadline'
+import type { RunStatus, TaskOutcome } from '../contracts/run'
 import { deepClone } from './deepClone'
 
 /** 默认持久化 key；多实例或多应用共存时，通过构造参数覆盖以免互相覆写。 */
@@ -25,6 +26,11 @@ export interface TraceEvent {
   decision?: 'approved' | 'rejected'
   durationMs?: number
   effectType?: string
+  phase?: RunDeadlinePhase
+  budgetMs?: number
+  activeElapsedMs?: number
+  retryable?: boolean
+  writeState?: 'committed' | 'unknown'
   summary?: {
     title: string
     rowLabels: string[]
@@ -40,6 +46,7 @@ export interface RunTrace {
   endedAt?: number
   status?: Extract<RunStatus, 'completed' | 'failed' | 'cancelled'>
   stopReason?: string
+  outcome?: TaskOutcome
   events: TraceEvent[]
 }
 
@@ -98,11 +105,13 @@ export class TraceCollector {
   finish(
     runId: string,
     status: Extract<RunStatus, 'completed' | 'failed' | 'cancelled'>,
-    stopReason?: string
+    stopReason?: string,
+    outcome?: TaskOutcome
   ): void {
     const trace = this.find(runId)
     trace.status = status
     trace.stopReason = stopReason
+    trace.outcome = outcome === undefined ? undefined : deepClone(outcome)
     trace.endedAt = Date.now()
     this.persist()
   }
@@ -169,12 +178,97 @@ function isOptionalNumber(value: unknown): boolean {
   return value === undefined || (typeof value === 'number' && Number.isFinite(value))
 }
 
+const RUN_DEADLINE_PHASES: RunDeadlinePhase[] = [
+  'page_context',
+  'prompt_composition',
+  'model_call',
+  'write_preparation',
+  'write_revalidation',
+  'route_navigation',
+  'page_adapter_wait',
+  'read_execution',
+  'navigation_execution',
+  'write_execution',
+  'ui_effect'
+]
+
+function isRunDeadlinePhase(value: unknown): value is RunDeadlinePhase {
+  return typeof value === 'string' &&
+    RUN_DEADLINE_PHASES.includes(value as RunDeadlinePhase)
+}
+
+function isWriteState(value: unknown): value is 'committed' | 'unknown' {
+  return value === 'committed' || value === 'unknown'
+}
+
+interface OutcomeErrorRecord extends Record<string, unknown> {
+  code: string
+  message: string
+  retryable: boolean
+}
+
+function hasOutcomeErrorBase(value: unknown): value is OutcomeErrorRecord {
+  return isRecord(value) &&
+    typeof value.code === 'string' &&
+    typeof value.message === 'string' &&
+    typeof value.retryable === 'boolean'
+}
+
+function hasOptionalWriteState(value: Record<string, unknown>): boolean {
+  return value.writeState === undefined || isWriteState(value.writeState)
+}
+
+function isTaskOutcome(value: unknown): value is TaskOutcome {
+  if (!isRecord(value) || typeof value.kind !== 'string') return false
+  if (value.kind === 'completed' || value.kind === 'needs_input') return true
+  if (value.kind === 'cancelled') return value.reason === 'user_stopped'
+  if (!hasOutcomeErrorBase(value.error)) return false
+
+  if (value.kind === 'timed_out') {
+    return value.error.code === 'RUN_DEADLINE_EXCEEDED' &&
+      isRunDeadlinePhase(value.error.phase) &&
+      typeof value.error.budgetMs === 'number' &&
+      Number.isFinite(value.error.budgetMs) &&
+      value.error.budgetMs >= 0 &&
+      typeof value.error.activeElapsedMs === 'number' &&
+      Number.isFinite(value.error.activeElapsedMs) &&
+      value.error.activeElapsedMs >= 0 &&
+      hasOptionalWriteState(value.error)
+  }
+
+  if (value.kind === 'failed') {
+    return [
+      'MAX_ROUNDS_REACHED',
+      'MAX_TOOL_CALLS_REACHED',
+      'TOOL_FAILED',
+      'RUNTIME_FAILED'
+    ].includes(value.error.code) && hasOptionalWriteState(value.error)
+  }
+
+  return false
+}
+
+function doesOutcomeMatchStatus(
+  outcome: TaskOutcome,
+  status: unknown
+): boolean {
+  if (outcome.kind === 'completed' || outcome.kind === 'needs_input') {
+    return status === 'completed'
+  }
+  if (outcome.kind === 'cancelled') return status === 'cancelled'
+  return status === 'failed'
+}
+
 function isTraceEvent(value: unknown): value is TraceEvent {
   if (!isRecord(value) || typeof value.type !== 'string') return false
   if (value.names !== undefined && (!Array.isArray(value.names) ||
     !value.names.every(item => typeof item === 'string'))) return false
   if (!isOptionalString(value.functionName) || !isOptionalString(value.toolCallId) ||
-    !isOptionalString(value.effectType) || !isOptionalNumber(value.durationMs)) return false
+    !isOptionalString(value.effectType) || !isOptionalNumber(value.durationMs) ||
+    !isOptionalNumber(value.budgetMs) || !isOptionalNumber(value.activeElapsedMs)) return false
+  if (value.phase !== undefined && !isRunDeadlinePhase(value.phase)) return false
+  if (value.retryable !== undefined && typeof value.retryable !== 'boolean') return false
+  if (value.writeState !== undefined && !isWriteState(value.writeState)) return false
   if (value.valid !== undefined && typeof value.valid !== 'boolean') return false
   if (value.decision !== undefined && value.decision !== 'approved' &&
     value.decision !== 'rejected') return false
@@ -194,6 +288,11 @@ function isRunTrace(value: unknown): value is RunTrace {
     typeof value.startedAt !== 'number' || !Number.isFinite(value.startedAt) ||
     !isOptionalNumber(value.endedAt) || !isOptionalString(value.stopReason) ||
     !Array.isArray(value.events) || !value.events.every(isTraceEvent)) return false
-  return value.status === undefined || value.status === 'completed' ||
-    value.status === 'failed' || value.status === 'cancelled'
+  if (value.status !== undefined && value.status !== 'completed' &&
+    value.status !== 'failed' && value.status !== 'cancelled') return false
+  if (value.outcome !== undefined) {
+    if (!isTaskOutcome(value.outcome)) return false
+    if (!doesOutcomeMatchStatus(value.outcome, value.status)) return false
+  }
+  return true
 }

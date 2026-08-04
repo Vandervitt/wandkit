@@ -17,6 +17,94 @@ function createStorage(initial: Record<string, string> = {}): TraceStorage & {
 }
 
 describe('TraceCollector', () => {
+  it('持久化结构化 outcome 且返回深拷贝', () => {
+    const storage = createStorage()
+    const traces = new TraceCollector(100, storage)
+    const outcome = {
+      kind: 'timed_out' as const,
+      error: {
+        code: 'RUN_DEADLINE_EXCEEDED' as const,
+        message: 'timeout',
+        retryable: false,
+        phase: 'write_execution' as const,
+        budgetMs: 100,
+        activeElapsedMs: 101,
+        writeState: 'unknown' as const
+      }
+    }
+    traces.start('run-1', 'trace-1', 'update')
+    traces.finish('run-1', 'failed', 'timeout', outcome)
+
+    const first = traces.recent()
+    first[0].outcome = { kind: 'completed' }
+    expect(traces.recent()[0].outcome).toEqual(outcome)
+    expect(new TraceCollector(100, storage).recent()[0].outcome).toEqual(outcome)
+  })
+
+  it('继续恢复没有 outcome 的 v1 Trace', () => {
+    const storage = createStorage({
+      [DEFAULT_TRACE_STORAGE_KEY]: JSON.stringify([{
+        runId: 'run-1',
+        traceId: 'trace-1',
+        inputSummary: '[redacted:length=1]',
+        startedAt: 1,
+        endedAt: 2,
+        status: 'completed',
+        events: []
+      }])
+    })
+
+    expect(new TraceCollector(100, storage).recent()[0].outcome).toBeUndefined()
+  })
+
+  it('恢复时丢弃带畸形 outcome 的记录', () => {
+    const storage = createStorage({
+      [DEFAULT_TRACE_STORAGE_KEY]: JSON.stringify([{
+        runId: 'run-1',
+        traceId: 'trace-1',
+        inputSummary: '[redacted:length=1]',
+        startedAt: 1,
+        endedAt: 2,
+        status: 'failed',
+        outcome: {
+          kind: 'timed_out',
+          error: {
+            code: 'RUN_DEADLINE_EXCEEDED',
+            message: 'timeout',
+            retryable: false
+          }
+        },
+        events: []
+      }])
+    })
+
+    expect(new TraceCollector(100, storage).recent()).toEqual([])
+  })
+
+  it('恢复时丢弃 outcome 与终态 status 不一致的记录', () => {
+    const storage = createStorage({
+      [DEFAULT_TRACE_STORAGE_KEY]: JSON.stringify([{
+        runId: 'run-1',
+        traceId: 'trace-1',
+        inputSummary: '[redacted:length=1]',
+        startedAt: 1,
+        endedAt: 2,
+        status: 'completed',
+        outcome: {
+          kind: 'failed',
+          error: {
+            code: 'RUNTIME_FAILED',
+            message: 'failed',
+            retryable: true
+          }
+        },
+        events: []
+      }])
+    })
+
+    expect(new TraceCollector(100, storage).recent()).toEqual([])
+  })
+
   it('记录成功、失败和取消的闭合 Run', () => {
     const traces = new TraceCollector()
 

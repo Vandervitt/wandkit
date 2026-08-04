@@ -1,4 +1,4 @@
-import type { RunStatus } from '../contracts/run'
+import type { RunStatus, TaskOutcome } from '../contracts/run'
 import type { RunTrace } from '../runtime/traceCollector'
 
 /**
@@ -7,6 +7,11 @@ import type { RunTrace } from '../runtime/traceCollector'
  * 对这类系统而言，「路径正确」比「文本像样」重要得多——选对模块、调对工具、写操作确实
  * 进了确认流程，才是它能不能上生产的判据。
  */
+export interface ExpectedTaskOutcome {
+  kind: TaskOutcome['kind']
+  code?: string
+}
+
 export interface EvalCase {
   id: string
   input: string
@@ -14,6 +19,7 @@ export interface EvalCase {
   expectedToolNames: string[]
   requireConfirmation?: boolean
   expectedStatus: Extract<RunStatus, 'completed' | 'failed' | 'cancelled'>
+  expectedOutcome?: ExpectedTaskOutcome
 }
 
 /** 一条未达预期的项。用稳定的 `code` 而非文案，便于在 CI 里聚合统计。 */
@@ -84,6 +90,29 @@ export function evaluateTrace(evalCase: EvalCase, trace: RunTrace): EvalResult {
       code: 'TERMINAL_STATUS_MISMATCH',
       message: `预期终态 ${evalCase.expectedStatus}，实际为 ${trace.status || 'unfinished'}`
     })
+  }
+
+  if (evalCase.expectedOutcome) {
+    const actualKind = trace.outcome?.kind
+    if (actualKind !== evalCase.expectedOutcome.kind) {
+      issues.push({
+        code: 'OUTCOME_KIND_MISMATCH',
+        message: `预期任务结果 ${evalCase.expectedOutcome.kind}，实际为 ${actualKind || 'missing'}`
+      })
+    }
+
+    const actualCode = trace.outcome && 'error' in trace.outcome
+      ? trace.outcome.error.code
+      : undefined
+    if (
+      evalCase.expectedOutcome.code !== undefined &&
+      actualCode !== evalCase.expectedOutcome.code
+    ) {
+      issues.push({
+        code: 'OUTCOME_CODE_MISMATCH',
+        message: `预期任务结果代码 ${evalCase.expectedOutcome.code}，实际为 ${actualCode || 'missing'}`
+      })
+    }
   }
 
   return { caseId: evalCase.id, passed: issues.length === 0, issues }

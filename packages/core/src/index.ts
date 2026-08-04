@@ -29,6 +29,7 @@ export {
 
 export type { ModuleDefinition } from './contracts/module'
 export type { PageAdapter } from './contracts/pageAdapter'
+export type { DeadlineScope, RunDeadlinePhase } from './contracts/deadline'
 export type {
   ToolResult,
   PreparedAction,
@@ -42,7 +43,15 @@ export {
   ToolPreparationError,
   ToolPreparationNotice
 } from './contracts/result'
-export type { RunSnapshot, RunState, RunStatus } from './contracts/run'
+export type {
+  RunSnapshot,
+  RunState,
+  RunStatus,
+  TaskOutcome,
+  TaskTimeout,
+  TaskFailure,
+  TaskOutcomeError
+} from './contracts/run'
 export type { LlmMessage, LlmAssistantMessage, LlmClient } from './contracts/llm'
 export { toOpenAIToolDefinition } from './contracts/openAITool'
 export { isValidToolSunsetDate } from './contracts/toolLifecycle'

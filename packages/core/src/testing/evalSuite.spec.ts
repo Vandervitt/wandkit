@@ -16,6 +16,50 @@ function createTrace(overrides: Partial<RunTrace> = {}): RunTrace {
 }
 
 describe('Trace Eval', () => {
+  it('配置 expectedOutcome 时校验 kind 和 code', () => {
+    const result = evaluateTrace({
+      id: 'timeout',
+      input: '查询',
+      expectedModuleId: 'gateway',
+      expectedToolNames: [],
+      expectedStatus: 'failed',
+      expectedOutcome: {
+        kind: 'timed_out',
+        code: 'RUN_DEADLINE_EXCEEDED'
+      }
+    }, createTrace({
+      status: 'failed',
+      outcome: {
+        kind: 'failed',
+        error: {
+          code: 'TOOL_FAILED',
+          message: 'failed',
+          retryable: false
+        }
+      },
+      events: [{ type: 'candidates', names: ['gateway'] }]
+    }))
+
+    expect(result.issues.map(issue => issue.code)).toEqual([
+      'OUTCOME_KIND_MISMATCH',
+      'OUTCOME_CODE_MISMATCH'
+    ])
+  })
+
+  it('未配置 expectedOutcome 时不要求旧 Trace 带 outcome', () => {
+    const result = evaluateTrace({
+      id: 'legacy',
+      input: '查询',
+      expectedModuleId: 'gateway',
+      expectedToolNames: [],
+      expectedStatus: 'completed'
+    }, createTrace({
+      events: [{ type: 'candidates', names: ['gateway'] }]
+    }))
+
+    expect(result.passed).toBe(true)
+  })
+
   it('模块、工具、参数校验、确认和终态符合预期时通过', () => {
     const result = evaluateTrace({
       id: 'gateway-update',
