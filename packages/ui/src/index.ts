@@ -1,9 +1,9 @@
 /**
- * `@toolairlock/ui` —— 治理层面向人的那两个界面。
+ * `@wandkit/ui` —— 治理层面向人的那两个界面。
  *
  * 只包含**安全承重**的组件，不提供聊天面板：
  *
- * - {@link ToolairlockConfirmCard} 是「披露真相」的唯一界面。少展示一部分（比如藏起
+ * - {@link WandkitConfirmCard} 是「披露真相」的唯一界面。少展示一部分（比如藏起
  *   原始请求、弱化拒绝按钮），治理就静默失效了，所以它的结构没有关闭开关。
  * - {@link InteractionMask} 是归属判定的前提。没有它，用户手动点的请求会被误判成
  *   Agent 的，API 层拦截的地基就塌了。
@@ -14,7 +14,7 @@
  * Vue 2 + Element UI 的老后台，也要能塞进 React 项目。
  */
 export {
-  ToolairlockConfirmCard,
+  WandkitConfirmCard,
   CONFIRM_CARD_TAG
 } from './confirmCard'
 export type {
@@ -25,7 +25,7 @@ export type {
 
 export {
   InteractionMask,
-  ToolairlockMaskElement,
+  WandkitMaskElement,
   MASK_TAG,
   MASK_LAYER
 } from './mask'

@@ -1,7 +1,7 @@
 {
-  "name": "toolairlock-workspace",
+  "name": "wandkit-workspace",
   "private": true,
-  "description": "Monorepo for toolairlock — write-operation governance for in-app LLM agents.",
+  "description": "Monorepo for Wandkit — write-operation governance for in-app LLM agents.",
   "license": "MIT",
   "type": "module",
   "workspaces": [

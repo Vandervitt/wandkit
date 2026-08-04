@@ -5,7 +5,7 @@
 
 ## 背景与问题
 
-`@toolairlock/interceptor` 在接管 `fetch` 时，需要先把调用参数投影成
+`@wandkit/interceptor` 在接管 `fetch` 时，需要先把调用参数投影成
 `InterceptedRequest`，再交给危险名单、放行名单和确认界面使用。当前实现存在两处同源缺陷：
 
 1. 只读取 `RequestInit.body`，忽略 `Request` 对象自身的 body。依赖 body 的危险规则会

@@ -1,9 +1,9 @@
 {
-  "name": "@toolairlock/ui",
+  "name": "@wandkit/ui",
   "version": "0.1.0",
-  "description": "Confirmation card and interaction mask for toolairlock. Framework-agnostic Web Components.",
+  "description": "Confirmation card and interaction mask for Wandkit. Framework-agnostic Web Components.",
   "keywords": [
-    "toolairlock",
+    "wandkit",
     "web-components",
     "human-in-the-loop",
     "confirmation"
@@ -32,10 +32,10 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "toolairlock": "^0.1.0"
+    "wandkit": "^0.1.0"
   },
   "devDependencies": {
-    "toolairlock": "^0.1.0",
+    "wandkit": "^0.1.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0"
   },

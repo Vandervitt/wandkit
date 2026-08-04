@@ -1,7 +1,7 @@
 /**
  * 桥接层：把核心运行时的 UI 事件翻译成会话状态。
  *
- * 它是**可选**的——会话本身不依赖 `toolairlock`，这层只在接入方确实用了核心运行时
+ * 它是**可选**的——会话本身不依赖 `wandkit`，这层只在接入方确实用了核心运行时
  * 时才引入。因此这里用最小的鸭子类型描述运行时，不 import 核心包。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'

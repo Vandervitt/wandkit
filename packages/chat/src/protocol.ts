@@ -4,12 +4,12 @@
  * 选它做边界有三个理由：
  *
  * 1. **主流厂商与网关都认它**——接入方把自己的后端摆在任意模型前面，UI 这侧不必改；
- * 2. **核心包已经用它**（`toolairlock` 的 `LlmMessage` 就是这套形状），因此接上
+ * 2. **核心包已经用它**（`wandkit` 的 `LlmMessage` 就是这套形状），因此接上
  *    Runtime 时不需要任何格式转换；
  * 3. **可脱离核心单独使用**——只要驱动方能吐出这个形状，UI 就能跑，哪怕根本没有
- *    toolairlock 运行时。
+ *    wandkit 运行时。
  *
- * 本文件刻意**不从 `toolairlock` 导入**类型：那会让本包硬依赖核心，与「可单独使用」
+ * 本文件刻意**不从 `wandkit` 导入**类型：那会让本包硬依赖核心，与「可单独使用」
  * 相矛盾。两边是结构性兼容的（TypeScript 的结构化类型让它们可以直接互传），
  * 一致性由 `protocol.spec.ts` 的编译期断言守住。
  */
@@ -125,7 +125,7 @@ export interface ChatEntry {
 /**
  * 待人工确认的写操作，投影给渲染层。
  *
- * 字段与 `toolairlock` 的 `ConfirmationRequest` 结构兼容，因此接上核心时可直接透传；
+ * 字段与 `wandkit` 的 `ConfirmationRequest` 结构兼容，因此接上核心时可直接透传；
  * 单独使用时由驱动方自行构造。
  */
 export interface ChatConfirmation {

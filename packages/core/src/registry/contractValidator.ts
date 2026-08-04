@@ -25,7 +25,7 @@ export function compileSchema(schema: TSchema): ValidateFunction {
  *
  * 抛出的 message 里带着 Ajv 的原始细节（`data.companyId must be integer`），只供
  * 开发者和链路追踪使用。Runtime 从不把它转发给用户，而是替换成
- * {@link AirlockMessages.invalidInput}——内部字段路径既不可读，也带轻微信息泄漏。
+ * {@link WandkitMessages.invalidInput}——内部字段路径既不可读，也带轻微信息泄漏。
  *
  * @throws `input` 不满足 Schema 时抛出。
  */

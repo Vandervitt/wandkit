@@ -3,15 +3,15 @@ import type { ChatConfirmation, ChatEntry, ChatState, ChatStatus } from './proto
 /**
  * 聊天面板，原生自定义元素 + Shadow DOM。
  *
- * 与 `@toolairlock/ui` 的分工：那边是**安全承重**组件（确认卡片、遮罩），结构不许裁剪；
+ * 与 `@wandkit/ui` 的分工：那边是**安全承重**组件（确认卡片、遮罩），结构不许裁剪；
  * 这边是**产品**组件，完全可以被接入方替换掉——只要照样把 {@link ChatState} 渲染出来、
  * 把用户动作派发出去即可。
  *
  * 面板自己不持有状态：`state` 进、事件出。这样它与 `ChatSession` 之间只有一条
  * 单向数据流，接入方也能把同一个会话同时接到自己的 React / Vue 组件上。
  *
- * 确认卡片**不由本组件渲染**：它是治理层唯一面向人的界面，理应由 `@toolairlock/ui`
- * 那个不可裁剪的实现负责。本组件只留一个挂载点，宿主把 `<toolairlock-confirm>` 放进来。
+ * 确认卡片**不由本组件渲染**：它是治理层唯一面向人的界面，理应由 `@wandkit/ui`
+ * 那个不可裁剪的实现负责。本组件只留一个挂载点，宿主把 `<wandkit-confirm>` 放进来。
  *
  * 视觉上与确认卡片共用一套亮色液态玻璃语言，这样卡片落在面板里不像外来物；同时面板自己
  * 的玻璃层比卡片轻一档，保证卡片始终是视觉重心——它是需要人做决定的那一块。
@@ -19,22 +19,22 @@ import type { ChatConfirmation, ChatEntry, ChatState, ChatStatus } from './proto
 
 const STYLE = `
 :host {
-  --_fg: var(--tal-fg, #0f1729);
-  --_dim: var(--tal-dim, #64748b);
-  --_faint: var(--tal-faint, #94a2b8);
-  --_line: var(--tal-border, rgba(15, 23, 41, .09));
-  --_glass: var(--tal-glass, rgba(255, 255, 255, .62));
-  --_accent: var(--tal-accent, #0a84ff);
-  --_success: var(--tal-success, #30c95f);
-  --_danger: var(--tal-danger, #ff3b30);
+  --_fg: var(--wandkit-fg, #0f1729);
+  --_dim: var(--wandkit-dim, #64748b);
+  --_faint: var(--wandkit-faint, #94a2b8);
+  --_line: var(--wandkit-border, rgba(15, 23, 41, .09));
+  --_glass: var(--wandkit-glass, rgba(255, 255, 255, .62));
+  --_accent: var(--wandkit-accent, #0a84ff);
+  --_success: var(--wandkit-success, #30c95f);
+  --_danger: var(--wandkit-danger, #ff3b30);
   display: flex; flex-direction: column; height: 100%; min-height: 0;
-  font-family: var(--tal-font, system-ui, -apple-system, "PingFang SC", sans-serif);
+  font-family: var(--wandkit-font, system-ui, -apple-system, "PingFang SC", sans-serif);
   font-size: 14px; letter-spacing: -.01em; color: var(--_fg);
   background:
     radial-gradient(70% 45% at 12% 4%, rgba(10, 132, 255, .2), transparent 62%),
     radial-gradient(60% 40% at 92% 20%, rgba(48, 201, 95, .14), transparent 60%),
     radial-gradient(80% 50% at 60% 104%, rgba(255, 59, 48, .11), transparent 62%),
-    var(--tal-bg, linear-gradient(160deg, #eef2f8, #e3e8f0));
+    var(--wandkit-bg, linear-gradient(160deg, #eef2f8, #e3e8f0));
 }
 
 [part="header"] {
@@ -74,7 +74,7 @@ const STYLE = `
 [part~="action"] svg { width: 15px; height: 15px; }
 [part="status"][data-status="busy"] [part="status-dot"],
 [part="status"][data-status="awaiting_confirmation"] [part="status-dot"] {
-  animation: tal-pulse 1.8s ease-in-out infinite;
+  animation: wandkit-pulse 1.8s ease-in-out infinite;
 }
 
 [part="progress"] { flex: 0 0 auto; height: 1px; overflow: hidden; background: transparent; }
@@ -82,7 +82,7 @@ const STYLE = `
 [part="progress-bar"] { display: block; height: 100%; }
 [part="progress"][data-active="true"] [part="progress-bar"] {
   background: linear-gradient(90deg, transparent, var(--_accent), transparent);
-  animation: tal-sweep 2.1s ease-in-out infinite;
+  animation: wandkit-sweep 2.1s ease-in-out infinite;
 }
 
 [part="log-wrap"] { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
@@ -122,10 +122,10 @@ const STYLE = `
 [part="step-spinner"] {
   flex: 0 0 auto; width: 11px; height: 11px; border-radius: 50%;
   border: 1.5px solid rgba(10, 132, 255, .25); border-top-color: #0a7ff0;
-  animation: tal-step-spin .7s linear infinite;
+  animation: wandkit-step-spin .7s linear infinite;
 }
 [part="step-label"] { white-space: pre-wrap; word-break: break-word; }
-@keyframes tal-step-spin { to { transform: rotate(360deg); } }
+@keyframes wandkit-step-spin { to { transform: rotate(360deg); } }
 /* 用户把动效关掉时，转圈就该停——但指示本身必须留着，否则忙碌态没有任何提示。 */
 @media (prefers-reduced-motion: reduce) {
   [part="step-spinner"] { animation: none; }
@@ -133,12 +133,12 @@ const STYLE = `
 
 [part="time"] {
   font-size: 11px; color: var(--_faint);
-  font-family: var(--tal-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--wandkit-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-variant-numeric: tabular-nums;
 }
 [part="cursor"] {
   display: inline-block; width: 6px; height: 1em; vertical-align: -2px; border-radius: 1px;
-  background: currentColor; animation: tal-blink 1.05s steps(2) infinite;
+  background: currentColor; animation: wandkit-blink 1.05s steps(2) infinite;
 }
 
 [part="jump"] {
@@ -184,9 +184,9 @@ const STYLE = `
   cursor: default; color: var(--_faint); background: rgba(15, 23, 41, .07); box-shadow: none;
 }
 
-@keyframes tal-blink { 0%, 50% { opacity: 1 } 50.01%, 100% { opacity: 0 } }
-@keyframes tal-pulse { 50% { opacity: .3 } }
-@keyframes tal-sweep {
+@keyframes wandkit-blink { 0%, 50% { opacity: 1 } 50.01%, 100% { opacity: 0 } }
+@keyframes wandkit-pulse { 50% { opacity: .3 } }
+@keyframes wandkit-sweep {
   0% { transform: translateX(-100%) } 100% { transform: translateX(100%) }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -244,7 +244,7 @@ function formatTime(at: number): string {
   return `${hours}:${minutes}`
 }
 
-export class ToolairlockChatPanel extends HTMLElement {
+export class WandkitChatPanel extends HTMLElement {
   private readonly root: ShadowRoot
   private current: ChatState = { entries: [], status: 'idle' }
   private headingText = '助手'
@@ -291,7 +291,7 @@ export class ToolairlockChatPanel extends HTMLElement {
     this.render()
   }
 
-  /** 确认卡片的挂载点。宿主把 `<toolairlock-confirm>` 放进来。 */
+  /** 确认卡片的挂载点。宿主把 `<wandkit-confirm>` 放进来。 */
   get confirmationHost(): HTMLElement {
     this.build()
     return this.confirmationSlot
@@ -604,10 +604,10 @@ export class ToolairlockChatPanel extends HTMLElement {
 }
 
 /** 元素名。重复注册跳过，便于热更新与多次引入下保持幂等。 */
-export const CHAT_PANEL_TAG = 'toolairlock-chat'
+export const CHAT_PANEL_TAG = 'wandkit-chat'
 
 if (typeof customElements !== 'undefined' && !customElements.get(CHAT_PANEL_TAG)) {
-  customElements.define(CHAT_PANEL_TAG, ToolairlockChatPanel)
+  customElements.define(CHAT_PANEL_TAG, WandkitChatPanel)
 }
 
 /** 面板派发的事件载荷。 */

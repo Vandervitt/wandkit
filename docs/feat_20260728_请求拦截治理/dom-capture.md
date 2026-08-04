@@ -313,7 +313,7 @@ Vue 双向绑定同步这条尤其值得记录：它证明 `input()` 里补派�
 
 修复：把在途请求纳入稳定判据。DOM 不动**且**没有请求在等，才算真的稳定。计数器
 patch `fetch` 与 `XMLHttpRequest.prototype.send`，只计数不改写内容，因此与
-`@toolairlock/interceptor` 的治理职责正交，两者可同时安装。
+`@wandkit/interceptor` 的治理职责正交，两者可同时安装。
 
 `XHR` 侧监听 `loadend` 而非 `load`：前者覆盖成功、失败、中止三种终态。
 
@@ -402,7 +402,7 @@ Element UI 的 tooltip 图标是 `<span class="el-tooltip" tabindex="0">`，仅�
 
 中途曾误判「bundle 未包含修复」——实际是 esbuild 压缩后的引号形式与我的检索字符串
 不符。更严重的是，我一度在**已关闭的弹窗**上反复诊断而不自知：每次
-`delete window.toolairlock` 重新加载脚本都会让页面状态重置。
+`delete window.wandkit` 重新加载脚本都会让页面状态重置。
 
 教训：**验证有状态的交互时，必须先确认状态仍然存在**，否则会在一个不存在的场景上
 反复推理。

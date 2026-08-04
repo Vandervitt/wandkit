@@ -1,5 +1,5 @@
 import { Type } from '@sinclair/typebox'
-import { defineReadTool, type ToolDefinition } from 'toolairlock'
+import { defineReadTool, type ToolDefinition } from 'wandkit'
 import { PageActionError, PageController } from './controller'
 
 /**

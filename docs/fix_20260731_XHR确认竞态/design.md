@@ -5,7 +5,7 @@
 
 ## 背景与问题
 
-`@toolairlock/interceptor` 会在 `XMLHttpRequest.send()` 时生成不可变的
+`@wandkit/interceptor` 会在 `XMLHttpRequest.send()` 时生成不可变的
 `InterceptedRequest`，等待异步确认后再调用原始 `send()`。但真正发送时使用的仍是原
 XHR 实例，而该实例在等待期间可以再次调用 `open()` 改写 method 与 URL。
 

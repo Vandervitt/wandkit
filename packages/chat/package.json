@@ -1,9 +1,9 @@
 {
-  "name": "@toolairlock/chat",
+  "name": "@wandkit/chat",
   "version": "0.1.0",
-  "description": "Headless conversation state plus optional chat panel for toolairlock. Speaks the OpenAI chat-completions wire format, with or without the core runtime.",
+  "description": "Headless conversation state plus optional chat panel for Wandkit. Speaks the OpenAI chat-completions wire format, with or without the core runtime.",
   "keywords": [
-    "toolairlock",
+    "wandkit",
     "openai",
     "chat",
     "web-components",
@@ -55,20 +55,20 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@toolairlock/ui": "^0.1.0",
-    "toolairlock": "^0.1.0"
+    "@wandkit/ui": "^0.1.0",
+    "wandkit": "^0.1.0"
   },
   "peerDependenciesMeta": {
-    "toolairlock": {
+    "wandkit": {
       "optional": true
     },
-    "@toolairlock/ui": {
+    "@wandkit/ui": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@toolairlock/ui": "^0.1.0",
-    "toolairlock": "^0.1.0",
+    "@wandkit/ui": "^0.1.0",
+    "wandkit": "^0.1.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0"
   },

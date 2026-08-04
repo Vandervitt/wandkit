@@ -321,7 +321,7 @@ describe('NavigationCoordinator', () => {
     await expect(navigating).resolves.toBe(adapter)
     expect(routerPort.push).toHaveBeenCalledWith({
       name: routeName,
-      query: { airlockRequestId: requestId }
+      query: { wandkitRequestId: requestId }
     })
   })
 
@@ -834,7 +834,7 @@ describe('ActionRouter A+B 执行通道', () => {
     expect(result.ok).toBe(true)
     expect(routerPort.push).toHaveBeenCalledWith({
       name: routeName,
-      query: { airlockRequestId: requestId }
+      query: { wandkitRequestId: requestId }
     })
     expect(execute).toHaveBeenCalledWith(context, {})
     expect(applyUiEffect).toHaveBeenCalledWith(showQueryEffect, requestId)

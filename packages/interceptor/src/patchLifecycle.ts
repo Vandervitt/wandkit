@@ -1,4 +1,4 @@
-const PATCH_SOURCE = '@toolairlock/interceptor' as const
+const PATCH_SOURCE = '@wandkit/interceptor' as const
 const PATCH_METADATA = Symbol.for(`${PATCH_SOURCE}.patch`)
 
 export type PatchKind =

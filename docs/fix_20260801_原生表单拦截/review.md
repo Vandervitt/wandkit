@@ -51,8 +51,8 @@
 
 ## 生命周期与事务复审
 
-- patch 元数据沿用 `Symbol.for('@toolairlock/interceptor.patch')`，支持多个 bundle 副本识别。
-- form 共享注册表使用 `Symbol.for('@toolairlock/interceptor.form-registry')`；不兼容值和抛错
+- patch 元数据沿用 `Symbol.for('@wandkit/interceptor.patch')`，支持多个 bundle 副本识别。
+- form 共享注册表使用 `Symbol.for('@wandkit/interceptor.form-registry')`；不兼容值和抛错
   getter 不被覆盖。
 - 事件上下文只协调同一个 SubmitEvent；microtask 中按 layer 逆序 gate。
 - 当前 gate 等待期间卸载会使旧 continuation 失效；全部 layer 失活时不自动放行。

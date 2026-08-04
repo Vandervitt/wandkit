@@ -5,7 +5,7 @@
 
 ## 背景与问题
 
-`@toolairlock/interceptor` 通过替换浏览器的 `fetch`、
+`@wandkit/interceptor` 通过替换浏览器的 `fetch`、
 `XMLHttpRequest.prototype.open/send` 和 `navigator.sendBeacon` 安装请求闸门。每次安装都
 保存当时的旧函数，卸载时再直接把旧函数写回。
 
@@ -83,7 +83,7 @@ request → wrapperB → gateB → wrapperA → gateA → browser API
 
 ### Patch 元数据
 
-在模块内部使用 `Symbol.for('@toolairlock/interceptor.patch')` 标记本库 wrapper。使用全局
+在模块内部使用 `Symbol.for('@wandkit/interceptor.patch')` 标记本库 wrapper。使用全局
 symbol 而不是模块内 `WeakMap`，使同一页面加载多个打包副本时仍能识别彼此的 patch 层。
 
 元数据包含：
@@ -94,7 +94,7 @@ interface PatchLifecycle {
 }
 
 interface PatchMetadata {
-  source: '@toolairlock/interceptor'
+  source: '@wandkit/interceptor'
   kind: 'fetch' | 'xhr-open' | 'xhr-send' | 'beacon'
   lifecycle: PatchLifecycle
   previous: Function

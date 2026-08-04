@@ -2,7 +2,7 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "paths": {
-      "toolairlock": ["../core/src/index.ts"]
+      "wandkit": ["../core/src/index.ts"]
     }
   },
   "include": ["src"]

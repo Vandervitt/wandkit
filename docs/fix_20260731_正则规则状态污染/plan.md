@@ -166,7 +166,7 @@ Run:
 
 ```bash
 npx vitest run packages/interceptor/src
-npm run typecheck --workspace @toolairlock/interceptor
+npm run typecheck --workspace @wandkit/interceptor
 ```
 
 Expected: interceptor 全部测试和类型检查通过。

@@ -1,20 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { CHAT_PANEL_TAG, ToolairlockChatPanel } from './panel'
+import { CHAT_PANEL_TAG, WandkitChatPanel } from './panel'
 import type { ChatState } from './protocol'
 
-function mount(state?: Partial<ChatState>): ToolairlockChatPanel {
-  const panel = document.createElement(CHAT_PANEL_TAG) as ToolairlockChatPanel
+function mount(state?: Partial<ChatState>): WandkitChatPanel {
+  const panel = document.createElement(CHAT_PANEL_TAG) as WandkitChatPanel
   document.body.appendChild(panel)
   panel.state = { entries: [], status: 'idle', ...state }
   return panel
 }
 
 // 按 token 匹配：`part` 是空格分隔的列表（如 `action close`），整串相等会漏掉多 token 的节点。
-function partOf(panel: ToolairlockChatPanel, name: string): HTMLElement | null {
+function partOf(panel: WandkitChatPanel, name: string): HTMLElement | null {
   return panel.shadowRoot?.querySelector(`[part~="${name}"]`) ?? null
 }
 
-function partsOf(panel: ToolairlockChatPanel, name: string): HTMLElement[] {
+function partsOf(panel: WandkitChatPanel, name: string): HTMLElement[] {
   return Array.from(panel.shadowRoot?.querySelectorAll(`[part~="${name}"]`) ?? [])
 }
 
@@ -263,7 +263,7 @@ describe('状态可见性', () => {
 describe('滚动', () => {
   /** jsdom 没有布局，scrollHeight / clientHeight 恒为 0，只能手工造出滚动位置。 */
   function fakeLayout(
-    panel: ToolairlockChatPanel,
+    panel: WandkitChatPanel,
     position: { scrollHeight: number, clientHeight: number, scrollTop: number }
   ): HTMLElement {
     const log = partOf(panel, 'log')!
@@ -325,8 +325,8 @@ describe('滚动', () => {
 })
 
 describe('确认卡片挂载点', () => {
-  it('暴露挂载点供宿主放置 toolairlock-confirm', () => {
-    // 确认卡片是治理层唯一面向人的界面，由 @toolairlock/ui 的不可裁剪实现负责，
+  it('暴露挂载点供宿主放置 wandkit-confirm', () => {
+    // 确认卡片是治理层唯一面向人的界面，由 @wandkit/ui 的不可裁剪实现负责，
     // 本面板只留位置。
     const panel = mount()
 

@@ -809,7 +809,7 @@ describe('批准后的安全重放', () => {
       enctype: form.getAttribute('enctype'),
       target: form.getAttribute('target')
     }).toEqual(originalAttributes)
-    expect(form.querySelectorAll('[data-toolairlock-replay]')).toHaveLength(0)
+    expect(form.querySelectorAll('[data-wandkit-replay]')).toHaveLength(0)
   })
 
   it('image submitter 坐标进入请求并通过 hidden input 重放', async () => {
@@ -849,7 +849,7 @@ describe('批准后的安全重放', () => {
       'photo.y': '9'
     })
     expect(replayedData).toEqual({ 'photo.x': '7', 'photo.y': '9' })
-    expect(form.querySelectorAll('[data-toolairlock-replay]')).toHaveLength(0)
+    expect(form.querySelectorAll('[data-wandkit-replay]')).toHaveLength(0)
   })
 
   it('后安装的外部 submit 抛错时仍恢复临时属性和字段', async () => {
@@ -876,7 +876,7 @@ describe('批准后的安全重放', () => {
       expect(confirm).toHaveBeenCalledTimes(1)
       expect(externalSubmit).toHaveBeenCalledTimes(1)
       expect(form.getAttribute('action')).toBe(originalAction)
-      expect(form.querySelectorAll('[data-toolairlock-replay]')).toHaveLength(0)
+      expect(form.querySelectorAll('[data-wandkit-replay]')).toHaveLength(0)
       expect(() => queuedTasks[0]()).toThrow('external submit failed')
     } finally {
       HTMLFormElement.prototype.submit = interceptedSubmit
@@ -951,7 +951,7 @@ describe('事务式安装', () => {
   })
 
   it('不兼容的共享注册表会拒绝安装且不覆盖外部值', () => {
-    const registrySymbol = Symbol.for('@toolairlock/interceptor.form-registry')
+    const registrySymbol = Symbol.for('@wandkit/interceptor.form-registry')
     const registryHost = window as unknown as Record<PropertyKey, unknown>
     const previousDescriptor = Object.getOwnPropertyDescriptor(window, registrySymbol)
     const externalRegistry = { owner: 'host' }
@@ -988,7 +988,7 @@ describe('事务式安装', () => {
   })
 
   it('共享注册表属性读取抛错时回滚并保留原异常', () => {
-    const registrySymbol = Symbol.for('@toolairlock/interceptor.form-registry')
+    const registrySymbol = Symbol.for('@wandkit/interceptor.form-registry')
     const previousDescriptor = Object.getOwnPropertyDescriptor(window, registrySymbol)
     const previousFetch = window.fetch
     const baselineFetch = vi.fn(async () => new Response('{}')) as typeof fetch

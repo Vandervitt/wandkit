@@ -1,4 +1,4 @@
-import { resolveMessages, type AirlockMessages } from '../config/messages'
+import { resolveMessages, type WandkitMessages } from '../config/messages'
 import type { DeadlineScope, RunDeadlinePhase } from '../contracts/deadline'
 import type { PageAdapter } from '../contracts/pageAdapter'
 import { cancelledResult, type PreparedAction, type ToolResult, type UiEffect } from '../contracts/result'
@@ -12,7 +12,7 @@ export interface ActionRouterDependencies {
   /** 把模块 ID 解析为它的规范路由名（通常取 `module.routes[0]`）。 */
   resolveRouteName(moduleId: string): string | undefined
   /** 覆盖面向用户的话术；缺省用内置英文。 */
-  messages?: Partial<AirlockMessages>
+  messages?: Partial<WandkitMessages>
 }
 
 export interface ExecuteActionOptions {
@@ -54,7 +54,7 @@ interface PageSyncRequest {
  */
 export class ActionRouter {
   private readonly dependencies: ActionRouterDependencies
-  private readonly messages: AirlockMessages
+  private readonly messages: WandkitMessages
 
   constructor(dependencies: ActionRouterDependencies) {
     this.dependencies = dependencies

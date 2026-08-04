@@ -103,11 +103,11 @@ describe('createMaskAttribution', () => {
 describe('接真实的 InteractionMask', () => {
   /**
    * 归属判定的整条依据就建立在遮罩上：遮罩武装期间用户点不动页面，因此窗口内的
-   * 请求必然来自 Agent。这条用例把 `@toolairlock/ui` 的真实实现接进来，确认
+   * 请求必然来自 Agent。这条用例把 `@wandkit/ui` 的真实实现接进来，确认
    * `armed` 属性与本包的假设一致——只测自己造的假遮罩，等于没测这条依据。
    */
   it('遮罩 arm / disarm 驱动归属判定', async () => {
-    const { InteractionMask } = await import('@toolairlock/ui')
+    const { InteractionMask } = await import('@wandkit/ui')
     const mask = new InteractionMask()
     const attribution = createMaskAttribution({ isMaskArmed: () => mask.armed })
 

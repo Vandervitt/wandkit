@@ -1,24 +1,24 @@
-# @toolairlock/chat
+# @wandkit/chat
 
 无头会话核心 + 可选聊天面板。**通信基于 OpenAI chat-completions 协议**，因此既能接
-`toolairlock` 核心运行时，也能完全脱离它单独使用。
+`wandkit` 核心运行时，也能完全脱离它单独使用。
 
 ## 三个入口
 
 | 入口 | 内容 | 依赖 |
 |---|---|---|
-| `@toolairlock/chat` | `ChatSession` 与协议类型 | 无，纯逻辑零 DOM |
-| `@toolairlock/chat/ui` | `<toolairlock-chat>` 面板 + `<toolairlock-dock>` 悬浮壳 | DOM |
-| `@toolairlock/chat/bridge` | 接 `AgentRuntime` | 无（鸭子类型，不 import 核心） |
+| `@wandkit/chat` | `ChatSession` 与协议类型 | 无，纯逻辑零 DOM |
+| `@wandkit/chat/ui` | `<wandkit-chat>` 面板 + `<wandkit-dock>` 悬浮壳 | DOM |
+| `@wandkit/chat/bridge` | 接 `AgentRuntime` | 无（鸭子类型，不 import 核心） |
 
 按需取用——只要无头核心时，面板与桥接不会被打进包里。
 
 ## 单独使用
 
-只要驱动方吐的是 OpenAI 形状，会话就能跑，不需要 toolairlock 运行时。
+只要驱动方吐的是 OpenAI 形状，会话就能跑，不需要 wandkit 运行时。
 
 ```ts
-import { ChatSession } from '@toolairlock/chat'
+import { ChatSession } from '@wandkit/chat'
 
 const session = new ChatSession()
 session.subscribe(state => render(state))
@@ -48,8 +48,8 @@ await fetch('/api/chat', {
 核心的 `LlmMessage` 就是同一套形状，因此两边**不需要任何格式转换**。
 
 ```ts
-import { ChatSession } from '@toolairlock/chat'
-import { connectRuntime } from '@toolairlock/chat/bridge'
+import { ChatSession } from '@wandkit/chat'
+import { connectRuntime } from '@wandkit/chat/bridge'
 
 const session = new ChatSession()
 const handlers = []
@@ -124,9 +124,9 @@ ID，放行它等于用旧的同意批准当前这次写入。
 ## 用自带面板
 
 ```ts
-import '@toolairlock/chat/ui'
+import '@wandkit/chat/ui'
 
-const panel = document.createElement('toolairlock-chat')
+const panel = document.createElement('wandkit-chat')
 panel.addEventListener('send', event => controls.send(event.detail.text))
 session.subscribe(state => { panel.state = state })
 container.appendChild(panel)
@@ -152,19 +152,20 @@ container.appendChild(panel)
 
 - part：`log` `entry` `bubble` `cursor` `step` `step-spinner` `step-label` `error`
   `confirmation` `composer` `input` `send` `action` `new-chat` `close`
-- 变量：`--tal-fg` `--tal-bg` `--tal-border` `--tal-danger` `--tal-radius` `--tal-font`
-  `--tal-user-bg` `--tal-bubble-bg`
+- 变量：`--wandkit-fg` `--wandkit-dim` `--wandkit-faint` `--wandkit-border`
+  `--wandkit-glass` `--wandkit-accent` `--wandkit-success` `--wandkit-danger`
+  `--wandkit-font` `--wandkit-bg` `--wandkit-mono`
 
 ### 确认卡片不由本面板渲染
 
-面板只留一个挂载点（`panel.confirmationHost`），宿主把 `@toolairlock/ui` 的
-`<toolairlock-confirm>` 放进去。
+面板只留一个挂载点（`panel.confirmationHost`），宿主把 `@wandkit/ui` 的
+`<wandkit-confirm>` 放进去。
 
 这是刻意的分工：确认卡片是**治理层唯一面向人的界面**，它的结构没有关闭开关；而聊天
 面板是产品组件，完全可以被替换。两者混在一起，替换面板就会顺手把卡片一起换掉。
 
 ```ts
-import { CONFIRM_CARD_TAG } from '@toolairlock/ui'
+import { CONFIRM_CARD_TAG } from '@wandkit/ui'
 
 session.subscribe(state => {
   panel.state = state
@@ -181,11 +182,11 @@ session.subscribe(state => {
 ## 嵌进别人的应用：悬浮壳
 
 面板自己只声明 `height: 100%`，定位交给宿主——于是接入方总要手写一段固定侧栏，助手常驻
-压住右侧一整条，还没有收起。那段样板由 `<toolairlock-dock>` 接管：**收起时只是右下角一个
+压住右侧一整条，还没有收起。那段样板由 `<wandkit-dock>` 接管：**收起时只是右下角一个
 图标，展开时是浮在应用之上的一块面板**，不参与宿主布局，不占据任何空间。
 
 ```ts
-import { CHAT_DOCK_TAG, CHAT_PANEL_TAG } from '@toolairlock/chat/ui'
+import { CHAT_DOCK_TAG, CHAT_PANEL_TAG } from '@wandkit/chat/ui'
 
 const dock = document.createElement(CHAT_DOCK_TAG)
 const panel = document.createElement(CHAT_PANEL_TAG)
@@ -205,7 +206,8 @@ session.subscribe(state => {
 `close`。展开后右下角图标会让位——留着只会被面板压住露出一角，看起来像点不了。
 
 - part：`frame` `launcher` `badge` `icon`
-- 变量：`--tal-dock-inset` `--tal-dock-width` `--tal-dock-height` `--tal-dock-size`
+- 变量：`--wandkit-dock-inset` `--wandkit-dock-width` `--wandkit-dock-height`
+  `--wandkit-dock-size` `--wandkit-accent` `--wandkit-danger` `--wandkit-font`
 - 事件：`dock-toggle`（`detail.open`），宿主可据此记住展开偏好
 - 属性：`open` 双向可写并反射为 `[open]`；`Esc` 收起
 
@@ -217,7 +219,7 @@ session.subscribe(state => {
 
 ### 层级高于遮罩，因此不必再撤罩
 
-壳的 `z-index` 是 `DOCK_LAYER`（2147483647），比 `@toolairlock/ui` 的 `MASK_LAYER` 高一级
+壳的 `z-index` 是 `DOCK_LAYER`（2147483647），比 `@wandkit/ui` 的 `MASK_LAYER` 高一级
 ——遮罩刻意让出的正是这一档。确认卡片挂在面板里，壳在遮罩之上才点得动。
 
 于是接入方**不需要**在确认期间撤掉遮罩（`createMaskReleaser`）：遮罩的职责是挡住用户操作

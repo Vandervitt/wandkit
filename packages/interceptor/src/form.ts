@@ -1,7 +1,7 @@
 import { markPatch, skipInactivePatches, type PatchLifecycle } from './patchLifecycle'
 import type { InterceptedRequest } from './types'
 
-const FORM_REGISTRY_SOURCE = '@toolairlock/interceptor' as const
+const FORM_REGISTRY_SOURCE = '@wandkit/interceptor' as const
 const FORM_REGISTRY = Symbol.for(`${FORM_REGISTRY_SOURCE}.form-registry`)
 
 type FormGate = (request: InterceptedRequest) => Promise<boolean>
@@ -477,7 +477,7 @@ function replaySubmission(
       input.type = 'hidden'
       input.name = entry.name
       input.value = entry.value
-      input.dataset.toolairlockReplay = ''
+      input.dataset.wandkitReplay = ''
       form.append(input)
       hidden.push(input)
     })

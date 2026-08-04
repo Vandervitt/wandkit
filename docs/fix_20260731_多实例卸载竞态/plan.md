@@ -467,7 +467,7 @@ git commit -m "fix: 复现请求通道多实例卸载竞态"
 在 `DEFAULT_CHANNELS` 后加入以下私有实现；不从包入口导出：
 
 ```ts
-const PATCH_SOURCE = '@toolairlock/interceptor' as const
+const PATCH_SOURCE = '@wandkit/interceptor' as const
 const PATCH_METADATA = Symbol.for(`${PATCH_SOURCE}.patch`)
 
 type PatchKind = 'fetch' | 'xhr-open' | 'xhr-send' | 'beacon'
@@ -568,7 +568,7 @@ Run:
 
 ```bash
 npx vitest run packages/interceptor/src/interceptor.spec.ts
-npm run typecheck --workspace @toolairlock/interceptor
+npm run typecheck --workspace @wandkit/interceptor
 ```
 
 Expected: `interceptor.spec.ts` 全部 PASS，interceptor 类型检查退出码 0。
@@ -704,7 +704,7 @@ Run:
 ```bash
 npx vitest run packages/interceptor/src/channels.spec.ts \
   packages/interceptor/src/interceptor.spec.ts
-npm run typecheck --workspace @toolairlock/interceptor
+npm run typecheck --workspace @wandkit/interceptor
 git diff --check
 ```
 

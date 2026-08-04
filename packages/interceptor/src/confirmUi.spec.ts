@@ -1,5 +1,5 @@
 /**
- * 把拦截器的确认请求接到 `@toolairlock/ui` 的确认卡片上。
+ * 把拦截器的确认请求接到 `@wandkit/ui` 的确认卡片上。
  *
  * 这层刻意很薄，但不能没有——拦截器故意不依赖 UI 包（它要能在没有界面的场景下
  * 单独治理宿主代码），而卡片需要 `confirmationId` 与 `rawRequest`，两者都不在
@@ -36,7 +36,7 @@ describe('入口隔离', () => {
    * 主入口不得 re-export 本模块。
    *
    * 实施中踩过：一旦从 `index.ts` 导出，任何一次 `import { createInterceptor }`
-   * 都会连带拉进 `@toolairlock/ui`，而那个包在模块顶层就 `extends HTMLElement`
+   * 都会连带拉进 `@wandkit/ui`，而那个包在模块顶层就 `extends HTMLElement`
    * ——在没有 DOM 的环境里直接崩，「拦截器可脱离界面单独使用」这条就废了。
    */
   it('主入口不导出确认卡片接线', async () => {
@@ -118,7 +118,7 @@ describe('渲染确认卡片', () => {
     void confirm({ request: request(), risk: 'write' })
     await Promise.resolve()
 
-    expect(cardIn(host).element.tagName.toLowerCase()).toBe('toolairlock-confirm')
+    expect(cardIn(host).element.tagName.toLowerCase()).toBe('wandkit-confirm')
   })
 })
 

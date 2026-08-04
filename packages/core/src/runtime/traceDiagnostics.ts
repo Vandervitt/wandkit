@@ -34,7 +34,7 @@ export type TraceDiagnosticsTarget = object
  * 宿主可以覆盖：开发者在控制台里敲的是哪个名字属于团队的肌肉记忆，接入本包不该
  * 把它改掉。
  */
-export const DEFAULT_TRACE_GLOBAL_KEY = '__TOOLAIRLOCK_TRACE__'
+export const DEFAULT_TRACE_GLOBAL_KEY = '__WANDKIT_TRACE__'
 
 /**
  * 把只读的 trace 诊断接口挂到全局。

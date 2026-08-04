@@ -177,7 +177,7 @@ Expected: PASS，14 个测试全部通过。
 Run:
 
 ```bash
-npm run typecheck --workspace @toolairlock/interceptor
+npm run typecheck --workspace @wandkit/interceptor
 ```
 
 Expected: 退出码 0。
@@ -216,7 +216,7 @@ Run:
 ```bash
 npx vitest run packages/interceptor/src/channels.spec.ts \
   packages/interceptor/src/interceptor.spec.ts
-npm run typecheck --workspace @toolairlock/interceptor
+npm run typecheck --workspace @wandkit/interceptor
 git diff --check
 ```
 

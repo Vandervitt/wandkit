@@ -1,6 +1,6 @@
-# toolairlock
+# wandkit
 
-> Nothing writes without passing through the airlock.
+> Safe, observable tool execution for in-app LLM agents.
 
 给 in-app LLM Agent 加上能上生产的安全带：**风险分级的工具契约、类型层面强制的两阶段写入、确认前的二次校验、权限过滤、写入不确定态建模、结构化审计与 eval**。
 
@@ -92,7 +92,7 @@ isCancelledResult(result)   // 读 result.cancelled，绝不比对 message 文�
 ## 安装
 
 ```bash
-npm i toolairlock
+npm i wandkit
 ```
 
 `@sinclair/typebox` 是 peer dependency。
@@ -104,7 +104,7 @@ import {
   AgentRuntime, ActionRouter, NavigationCoordinator, PageAdapterRegistry,
   createToolRegistry, resolveCandidates, composePromptMessages,
   defineReadTool, defineWriteTool
-} from 'toolairlock'
+} from 'wandkit'
 
 const queryUsers = defineReadTool({
   moduleId: 'user', name: 'query', version: 1, owner: 'user-team',
@@ -176,12 +176,12 @@ new AgentRuntime(deps, {
 createPromptComposer({ systemPrompt: MY_PROMPT, timeZone: 'Europe/Berlin' })
 ```
 
-全部面向用户的话术见 `AirlockMessages`，逐条可覆盖。
+全部面向用户的话术见 `WandkitMessages`，逐条可覆盖。
 
 ## 测试工具
 
 ```ts
-import { evaluateTrace, collectModuleContractIssues, FakeLlm } from 'toolairlock/testing'
+import { evaluateTrace, collectModuleContractIssues, FakeLlm } from 'wandkit/testing'
 
 // 断言 trace：选中了预期模块、调了预期工具、写操作确实进了确认流程、终态正确
 evaluateTrace(evalCase, runtime.traces.get(runId))
@@ -193,7 +193,7 @@ collectModuleContractIssues({ modules, tools })
 
 ## 核心包不做什么
 
-`toolairlock` 本身**只是闸门**：
+`wandkit` 本身**只是闸门**：
 
 - 不解析 DOM、不模拟点击
 - 不调用模型、不管 Key
@@ -207,10 +207,10 @@ collectModuleContractIssues({ modules, tools })
 
 | 包 | 提供什么 | 何时需要 |
 |---|---|---|
-| `@toolairlock/ui` | 确认卡片、交互遮罩 | 想直接用现成的确认界面 |
-| `@toolairlock/chat` | 会话状态机（OpenAI 协议）+ 可选聊天面板 | 需要对话界面 |
-| `@toolairlock/executor` | 通用 DOM 操作原语 | 想让 Agent 操作页面，而不必逐个声明业务工具 |
-| `@toolairlock/interceptor` | 请求层拦截治理（默认拒绝 + 名单） | 想治理**未经声明**的写操作 |
+| `@wandkit/ui` | 确认卡片、交互遮罩 | 想直接用现成的确认界面 |
+| `@wandkit/chat` | 会话状态机（OpenAI 协议）+ 可选聊天面板 | 需要对话界面 |
+| `@wandkit/executor` | 通用 DOM 操作原语 | 想让 Agent 操作页面，而不必逐个声明业务工具 |
+| `@wandkit/interceptor` | 请求层拦截治理（默认拒绝 + 名单） | 想治理**未经声明**的写操作 |
 
 ### 两条治理路径
 
@@ -228,7 +228,7 @@ collectModuleContractIssues({ modules, tools })
 **纵深防御，不是二选一**：A 精确制导，B 兜底渔网。B 的存在让 A 的覆盖缺口不再致命
 ——宿主自有代码、以及 Agent 用 DOM 原语做的任何事，都在 B 的射程内。
 
-`@toolairlock/executor` 的 DOM 原语正是需要 B 的原因：它让 Agent 能做没声明过的事，
+`@wandkit/executor` 的 DOM 原语正是需要 B 的原因：它让 Agent 能做没声明过的事，
 而那些事的风险无法在调用前预判，只能按真实发出的请求逐个定级。
 
 ## 状态

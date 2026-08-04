@@ -4,7 +4,7 @@ import type { ChatSession } from './session'
 /**
  * 桥接层：把 `AgentRuntime` 的事件翻译成会话状态，把界面动作翻译成运行时调用。
  *
- * **本文件不 import `toolairlock`。** 那会让整个 chat 包硬依赖核心运行时，与
+ * **本文件不 import `wandkit`。** 那会让整个 chat 包硬依赖核心运行时，与
  * 「可单独使用」直接冲突。改用最小的鸭子类型描述运行时——TypeScript 的结构化类型
  * 让真正的 `AgentRuntime` 可以直接传进来，无需任何适配。
  */

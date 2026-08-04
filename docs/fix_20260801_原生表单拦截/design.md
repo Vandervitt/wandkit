@@ -102,11 +102,11 @@ Beacon 和 Form 共用。`PatchKind` 增加 `'form-submit'`。
 
 同一 Window 可能加载多个 interceptor 实例或多个 bundle 副本。form 事件不能让每个实例
 独立暂停和重放，否则会产生重复原生提交。因此在 `view` 上通过
-`Symbol.for('@toolairlock/interceptor.form-registry')` 保存结构校验后的内部注册表：
+`Symbol.for('@wandkit/interceptor.form-registry')` 保存结构校验后的内部注册表：
 
 ```ts
 interface FormRegistry {
-  source: '@toolairlock/interceptor'
+  source: '@wandkit/interceptor'
   eventContexts: WeakMap<SubmitEvent, FormEventContext>
   replayingForms: WeakSet<HTMLFormElement>
 }
@@ -347,7 +347,7 @@ README 必须明确：启用 form 通道时，formdata 处理器应保持幂等�
 ```bash
 npx vitest run packages/interceptor/src/form.spec.ts
 npx vitest run packages/interceptor/src
-npm run typecheck --workspace @toolairlock/interceptor
+npm run typecheck --workspace @wandkit/interceptor
 npm run verify
 ```
 

@@ -6,5 +6,5 @@ export default defineConfig({
   dts: true,
   clean: true,
   sourcemap: true,
-  external: ['toolairlock', '@toolairlock/ui']
+  external: ['wandkit', '@wandkit/ui']
 })

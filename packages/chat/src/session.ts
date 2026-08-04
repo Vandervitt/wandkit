@@ -21,10 +21,10 @@ type Listener = (state: ChatState) => void
 /**
  * 无头会话状态机。
  *
- * **不碰 DOM，不发请求，不依赖 toolairlock。** 它只做一件事：把 OpenAI 形态的消息与
+ * **不碰 DOM，不发请求，不依赖 wandkit。** 它只做一件事：把 OpenAI 形态的消息与
  * 流式增量，变成渲染层能直接用的状态。因此它可以：
  *
- * - 接 `AgentRuntime`（见 `@toolairlock/chat/bridge`）
+ * - 接 `AgentRuntime`（见 `@wandkit/chat/bridge`）
  * - 也可以直接接接入方自己的后端——只要那边吐的是 OpenAI 形状
  * - 还可以配任意界面：自带的 Web Component、或接入方的 React / Vue 组件
  *

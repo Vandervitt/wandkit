@@ -136,7 +136,7 @@ console.log('  漏配的代价是多一次确认，而不是静默失去防护�
 line(`全部实际发出的请求（${sent.length} 条）`)
 sent.forEach(entry => console.log(`  ${entry}`))
 
-// ── 场景六：接 @toolairlock/ui 的真实确认卡片 ────────────────────────
+// ── 场景六：接 @wandkit/ui 的真实确认卡片 ────────────────────────
 line('【场景六】接真实确认卡片 —— 判定归拦截器，问人归 ui 包')
 
 const { createConfirmCardHandler } = await import('../packages/interceptor/src/confirmUi')
@@ -158,7 +158,7 @@ const pending = cardConfirm({
 await Promise.resolve()
 
 const card = host.firstElementChild as HTMLElement & { data: { confirmationId: string } }
-console.log(`  卡片元素: <${card.tagName.toLowerCase()}>   ← 来自 @toolairlock/ui`)
+console.log(`  卡片元素: <${card.tagName.toLowerCase()}>   ← 来自 @wandkit/ui`)
 const shadow = card.shadowRoot as ShadowRoot
 console.log(`  标题: ${shadow.querySelector('[part="title"]')?.textContent}`)
 console.log(`  影响: ${shadow.querySelector('[part="impact"]')?.textContent}`)

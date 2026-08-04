@@ -3,7 +3,7 @@ import type { RunStatus, TaskOutcome } from '../contracts/run'
 import { deepClone } from './deepClone'
 
 /** 默认持久化 key；多实例或多应用共存时，通过构造参数覆盖以免互相覆写。 */
-export const DEFAULT_TRACE_STORAGE_KEY = 'toolairlock:traces:v1'
+export const DEFAULT_TRACE_STORAGE_KEY = 'wandkit:traces:v1'
 
 /** localStorage 的最小子集，抽出来是为了让测试与非浏览器环境都能注入。 */
 export interface TraceStorage {

@@ -1,7 +1,7 @@
 import {
   formatMessage,
   resolveMessages,
-  type AirlockMessages
+  type WandkitMessages
 } from '../config/messages'
 import type { LlmMessage } from '../contracts/llm'
 import type { ModuleDefinition } from '../contracts/module'
@@ -139,7 +139,7 @@ export interface AgentRuntimeOptions {
   now?: () => number
   traces?: TraceCollector
   /** 覆盖面向用户的话术；缺省用内置中文。 */
-  messages?: Partial<AirlockMessages>
+  messages?: Partial<WandkitMessages>
   /**
    * 一轮内最多激活多少个模块，缺省 {@link MAX_CANDIDATE_MODULES}。
    *
@@ -262,7 +262,7 @@ export class AgentRuntime {
   private readonly maxToolCalls: number
   private readonly runTimeoutMs: number
   private readonly now: () => number
-  private readonly messages: AirlockMessages
+  private readonly messages: WandkitMessages
   private readonly maxCandidateModules: number
   private readonly maxExposedTools: number
   private readonly skippedAfterFailureResult: ToolResult

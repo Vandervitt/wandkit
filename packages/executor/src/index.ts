@@ -1,5 +1,5 @@
 /**
- * `@toolairlock/executor` —— 通用 DOM 操作原语。
+ * `@wandkit/executor` —— 通用 DOM 操作原语。
  *
  * 让 Agent 无需逐个声明业务能力，就能操作任意页面：声明 4 个原语（读页面、点击、
  * 输入、选择），Agent 能做的事就等于用户在界面上能做的事。

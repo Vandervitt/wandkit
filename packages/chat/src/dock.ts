@@ -13,21 +13,21 @@ import type { ChatState, ChatStatus } from './protocol'
  * 右下角一个图标，展开时是一块浮在应用之上的面板**——不参与宿主布局，不占据任何空间。
  *
  * 它是**产品**组件，和面板一样可以被接入方整个换掉；换掉时唯一必须保留的是
- * {@link ToolairlockChatDock.state} 里那条「待确认强制展开」的规则，那是治理不静默失效的
+ * {@link WandkitChatDock.state} 里那条「待确认强制展开」的规则，那是治理不静默失效的
  * 前提，见下文。
  *
  * 与面板的分工：本组件只管「在不在、多大、在哪儿」，一个字的会话内容都不渲染。内容由
- * 插槽里的 `<toolairlock-chat>`（或接入方自己的实现）负责。
+ * 插槽里的 `<wandkit-chat>`（或接入方自己的实现）负责。
  *
  * 可用的 part：`frame` `launcher` `badge` `icon`
- * 可用的变量：`--tal-dock-inset` `--tal-dock-width` `--tal-dock-height` `--tal-dock-size`
- *   `--tal-accent` `--tal-font`
+ * 可用的变量：`--wandkit-dock-inset` `--wandkit-dock-width` `--wandkit-dock-height` `--wandkit-dock-size`
+ *   `--wandkit-accent` `--wandkit-font`
  */
 
 /**
  * 悬浮壳的层级。
  *
- * **必须高于 `@toolairlock/ui` 的 `MASK_LAYER`（2147483646）**：确认卡片挂在面板里，
+ * **必须高于 `@wandkit/ui` 的 `MASK_LAYER`（2147483646）**：确认卡片挂在面板里，
  * 而遮罩压过宿主的一切弹层——壳若在遮罩之下，Agent 干活期间弹出的卡片就点不动，Run 卡在
  * 等待确认而用户看不出原因（真实接入实测踩过，那次是靠临时撤掉遮罩绕开的）。
  *
@@ -48,9 +48,9 @@ const LAUNCHER_LABEL: Record<ChatStatus, string> = {
 const STYLE = `
 :host {
   display: contents;
-  --_inset: var(--tal-dock-inset, 24px);
-  --_size: var(--tal-dock-size, 52px);
-  --_accent: var(--tal-accent, #0a84ff);
+  --_inset: var(--wandkit-dock-inset, 24px);
+  --_size: var(--wandkit-dock-size, 52px);
+  --_accent: var(--wandkit-accent, #0a84ff);
 }
 
 [part="frame"] {
@@ -61,16 +61,16 @@ const STYLE = `
   z-index: ${DOCK_LAYER};
   display: flex;
   flex-direction: column;
-  width: var(--tal-dock-width, 400px);
+  width: var(--wandkit-dock-width, 400px);
   max-width: calc(100vw - var(--_inset) * 2);
-  height: var(--tal-dock-height, 620px);
+  height: var(--wandkit-dock-height, 620px);
   max-height: calc(100vh - var(--_inset) * 2);
   overflow: hidden;
   border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, .9);
   box-shadow: 0 32px 72px -28px rgba(15, 23, 41, .5), 0 2px 8px -4px rgba(15, 23, 41, .18);
-  animation: tal-dock-in .18s cubic-bezier(.2, .8, .3, 1);
-  font-family: var(--tal-font, system-ui, -apple-system, "PingFang SC", sans-serif);
+  animation: wandkit-dock-in .18s cubic-bezier(.2, .8, .3, 1);
+  font-family: var(--wandkit-font, system-ui, -apple-system, "PingFang SC", sans-serif);
 }
 [part="frame"][hidden] { display: none; }
 /* 插槽里的面板负责撑满壳；它自己只声明 height:100%，需要一个确定的高度来源。 */
@@ -115,11 +115,11 @@ const STYLE = `
   border-radius: 50%;
   background: var(--_accent);
   border: 2px solid rgba(255, 255, 255, .95);
-  animation: tal-dock-pulse 1.8s ease-in-out infinite;
+  animation: wandkit-dock-pulse 1.8s ease-in-out infinite;
 }
 [part="badge"][hidden] { display: none; }
 [part="launcher"][data-status="awaiting_confirmation"] [part="badge"] {
-  background: var(--tal-danger, #ff3b30);
+  background: var(--wandkit-danger, #ff3b30);
 }
 
 /* 窄屏上 400px 的浮层等于半个屏幕，贴边留一点缝比强行居中更像原生。 */
@@ -135,10 +135,10 @@ const STYLE = `
   }
 }
 
-@keyframes tal-dock-in {
+@keyframes wandkit-dock-in {
   from { opacity: 0; transform: translateY(10px) scale(.985); }
 }
-@keyframes tal-dock-pulse { 50% { opacity: .35 } }
+@keyframes wandkit-dock-pulse { 50% { opacity: .35 } }
 @media (prefers-reduced-motion: reduce) {
   [part="frame"] { animation: none; }
   [part="launcher"] { transition: none; }
@@ -152,7 +152,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg'
 const BUBBLE_PATH =
   'M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4.2 3.5A1 1 0 0 1 4 17.7Z'
 
-export class ToolairlockChatDock extends HTMLElement {
+export class WandkitChatDock extends HTMLElement {
   private readonly root: ShadowRoot
   private frame!: HTMLElement
   private launcher!: HTMLButtonElement
@@ -291,10 +291,10 @@ export class ToolairlockChatDock extends HTMLElement {
 }
 
 /** 元素名。重复注册跳过，便于热更新与多次引入下保持幂等。 */
-export const CHAT_DOCK_TAG = 'toolairlock-dock'
+export const CHAT_DOCK_TAG = 'wandkit-dock'
 
 if (typeof customElements !== 'undefined' && !customElements.get(CHAT_DOCK_TAG)) {
-  customElements.define(CHAT_DOCK_TAG, ToolairlockChatDock)
+  customElements.define(CHAT_DOCK_TAG, WandkitChatDock)
 }
 
 /** 壳派发的事件载荷。宿主可据此把展开偏好记下来。 */

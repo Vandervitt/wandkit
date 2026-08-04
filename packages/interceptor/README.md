@@ -1,4 +1,4 @@
-# @toolairlock/interceptor
+# @wandkit/interceptor
 
 请求层的兜底治理。核心包治理**已声明**的工具，本包治理**一切走网络的写**——包括从未
 被声明成工具的那些。
@@ -11,7 +11,7 @@
 天然缺口：
 
 - **宿主自有代码**的写操作从来不经过它
-- **`@toolairlock/executor` 的 DOM 原语**让 Agent 能做没声明过的事，那些事的风险
+- **`@wandkit/executor` 的 DOM 原语**让 Agent 能做没声明过的事，那些事的风险
   无法在调用前预判
 
 本包把闸门下沉到请求层：不管写操作是怎么来的，发出去之前都要过一遍。
@@ -23,7 +23,7 @@ import {
   createInterceptor,
   createMaskAttribution,
   createAuthorizationScope
-} from '@toolairlock/interceptor'
+} from '@wandkit/interceptor'
 
 const interceptor = createInterceptor({
   policy: {
@@ -94,7 +94,7 @@ createMaskAttribution({ isMaskArmed: () => mask.armed, graceMs: 500 })
 话，**每给一个动作写声明式工具，反而多挨一次确认**——那等于惩罚正确做法。
 
 ```ts
-import { runAuthorized } from '@toolairlock/interceptor'
+import { runAuthorized } from '@wandkit/interceptor'
 
 await runAuthorized({ scope, token: confirmationId }, async () => {
   await api.deleteCustomer(id)   // 窗口内不再问人
@@ -167,19 +167,19 @@ submitter 字段差异计算和最终原生提交都可能再次运行 FormData 
 ## 接现成的确认卡片
 
 ```ts
-import { createConfirmCardHandler } from '@toolairlock/interceptor/confirm-ui'
+import { createConfirmCardHandler } from '@wandkit/interceptor/confirm-ui'
 
 const confirm = createConfirmCardHandler({ host: document.body, mask })
 ```
 
-单独子入口，因为它 import 了 `@toolairlock/ui`，而那个包在模块顶层就
+单独子入口，因为它 import 了 `@wandkit/ui`，而那个包在模块顶层就
 `extends HTMLElement`。从主入口导出会让任何一次 import 都要求 DOM——**拦截器要能在
 没有界面的场景下单独使用**。
 
 ## 审计闭环
 
 ```ts
-import { createTraceRecorder } from '@toolairlock/interceptor'
+import { createTraceRecorder } from '@wandkit/interceptor'
 
 createInterceptor({
   // …

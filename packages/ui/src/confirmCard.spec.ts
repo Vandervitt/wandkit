@@ -3,7 +3,7 @@ import './confirmCard'
 import type { ConfirmCardData } from './confirmCard'
 
 function createCard(overrides: Partial<ConfirmCardData> = {}) {
-  const card = document.createElement('toolairlock-confirm') as HTMLElement & {
+  const card = document.createElement('wandkit-confirm') as HTMLElement & {
     data: ConfirmCardData | null
   }
   card.data = {
@@ -191,4 +191,3 @@ describe('确认卡片', () => {
     expect(document.querySelector('[part="approve"]')).toBeNull()
   })
 })
-

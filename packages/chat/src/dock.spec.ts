@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { CHAT_DOCK_TAG, DOCK_LAYER, ToolairlockChatDock } from './dock'
+import { CHAT_DOCK_TAG, DOCK_LAYER, WandkitChatDock } from './dock'
 import type { ChatState } from './protocol'
 
-function mount(): ToolairlockChatDock {
-  const dock = document.createElement(CHAT_DOCK_TAG) as ToolairlockChatDock
+function mount(): WandkitChatDock {
+  const dock = document.createElement(CHAT_DOCK_TAG) as WandkitChatDock
   const content = document.createElement('div')
   content.id = 'content'
   dock.appendChild(content)
@@ -11,7 +11,7 @@ function mount(): ToolairlockChatDock {
   return dock
 }
 
-function partOf(dock: ToolairlockChatDock, name: string): HTMLElement {
+function partOf(dock: WandkitChatDock, name: string): HTMLElement {
   const node = dock.shadowRoot?.querySelector(`[part="${name}"]`)
   if (!node) throw new Error(`缺少 part="${name}"`)
   return node as HTMLElement
@@ -180,7 +180,7 @@ describe('状态与提醒', () => {
 
 describe('层级', () => {
   it('压过遮罩层——面板里就是确认卡片，被罩住等于治理失效', () => {
-    // @toolairlock/ui 的 MASK_LAYER 是 2147483646，这里必须再高一级
+    // @wandkit/ui 的 MASK_LAYER 是 2147483646，这里必须再高一级
     expect(DOCK_LAYER).toBeGreaterThan(2147483646)
   })
 

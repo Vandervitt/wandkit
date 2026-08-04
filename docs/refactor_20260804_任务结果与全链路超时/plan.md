@@ -218,7 +218,7 @@ Run:
 
 ```bash
 npx vitest run packages/core/src/runtime/runDeadline.spec.ts
-npm run typecheck --workspace=toolairlock
+npm run typecheck --workspace=wandkit
 ```
 
 Expected: RunDeadline 测试全部 PASS，Core typecheck 退出码为 0。

@@ -117,7 +117,7 @@ export interface WaitForStableOptions {
 /**
  * 在途请求计数。
  *
- * 只做计数、不改写任何请求内容，因此与 `@toolairlock/interceptor` 的治理职责正交，
+ * 只做计数、不改写任何请求内容，因此与 `@wandkit/interceptor` 的治理职责正交，
  * 两者可以同时安装。
  */
 interface RequestTracker {

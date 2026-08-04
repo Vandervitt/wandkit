@@ -40,22 +40,22 @@ export interface ConfirmCardData {
  * 面对一个凭空出现的对话框。
  *
  * 可用的 part：`card` `risk` `title` `rows` `impact` `raw` `actions` `approve` `reject`
- * 可用的变量：`--tal-fg` `--tal-bg` `--tal-border` `--tal-danger` `--tal-accent`
- *   `--tal-dim` `--tal-radius` `--tal-font` `--tal-mono`
+ * 可用的变量：`--wandkit-fg` `--wandkit-bg` `--wandkit-border` `--wandkit-danger` `--wandkit-accent`
+ *   `--wandkit-dim` `--wandkit-radius` `--wandkit-font` `--wandkit-mono`
  */
 const STYLE = `
 :host { display: block; }
 [part="card"] {
-  --_dim: var(--tal-dim, #64748b);
-  --_accent: var(--tal-accent, #0a84ff);
-  --_danger: var(--tal-danger, #ff3b30);
-  font-family: var(--tal-font, system-ui, -apple-system, "PingFang SC", sans-serif);
-  color: var(--tal-fg, #0f1729);
-  background: var(--tal-bg, rgba(255, 255, 255, .74));
+  --_dim: var(--wandkit-dim, #64748b);
+  --_accent: var(--wandkit-accent, #0a84ff);
+  --_danger: var(--wandkit-danger, #ff3b30);
+  font-family: var(--wandkit-font, system-ui, -apple-system, "PingFang SC", sans-serif);
+  color: var(--wandkit-fg, #0f1729);
+  background: var(--wandkit-bg, rgba(255, 255, 255, .74));
   -webkit-backdrop-filter: blur(28px) saturate(1.7);
   backdrop-filter: blur(28px) saturate(1.7);
-  border: 1px solid var(--tal-border, rgba(255, 255, 255, .95));
-  border-radius: var(--tal-radius, 22px);
+  border: 1px solid var(--wandkit-border, rgba(255, 255, 255, .95));
+  border-radius: var(--wandkit-radius, 22px);
   box-shadow: 0 26px 56px -28px rgba(15, 23, 41, .32), 0 3px 12px -8px rgba(15, 23, 41, .18);
   padding: 15px 18px 18px;
   line-height: 1.6;
@@ -104,7 +104,7 @@ const STYLE = `
 [part="raw"] pre {
   margin: 7px 0 0; padding: 11px 13px; overflow-x: auto;
   background: rgba(15, 23, 41, .055); border-radius: 13px; color: #3c4a60;
-  font-family: var(--tal-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--wandkit-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 11.5px; line-height: 1.6; white-space: pre-wrap; word-break: break-all;
 }
 [part="actions"] { display: flex; gap: 10px; }
@@ -169,14 +169,14 @@ function formatBody(body: unknown): string {
  *
  * 用法：
  * ```ts
- * const card = document.createElement('toolairlock-confirm')
+ * const card = document.createElement('wandkit-confirm')
  * card.data = { confirmationId, title, rows, risk, rawRequest }
  * card.addEventListener('approve', e => runtime.confirm(e.detail.confirmationId))
  * card.addEventListener('reject', e => runtime.cancel(e.detail.confirmationId))
  * container.appendChild(card)
  * ```
  */
-export class ToolairlockConfirmCard extends HTMLElement {
+export class WandkitConfirmCard extends HTMLElement {
   private readonly root: ShadowRoot
   private state: ConfirmCardData | null = null
   /** 一次交互只允许产生一个决定，见 {@link decide}。 */
@@ -323,8 +323,8 @@ export class ToolairlockConfirmCard extends HTMLElement {
 }
 
 /** 元素名。重复注册直接跳过，便于在热更新与多次引入下保持幂等。 */
-export const CONFIRM_CARD_TAG = 'toolairlock-confirm'
+export const CONFIRM_CARD_TAG = 'wandkit-confirm'
 
 if (typeof customElements !== 'undefined' && !customElements.get(CONFIRM_CARD_TAG)) {
-  customElements.define(CONFIRM_CARD_TAG, ToolairlockConfirmCard)
+  customElements.define(CONFIRM_CARD_TAG, WandkitConfirmCard)
 }

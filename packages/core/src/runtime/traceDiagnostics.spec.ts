@@ -18,7 +18,7 @@ describe('Trace Diagnostics', () => {
 
     installTraceDiagnostics(target, traces, true)
 
-    expect((target.__TOOLAIRLOCK_TRACE__ as any).summary()).toEqual({
+    expect((target.__WANDKIT_TRACE__ as any).summary()).toEqual({
       runs: 2,
       completed: 1,
       failed: 1,
@@ -36,14 +36,14 @@ describe('Trace Diagnostics', () => {
     const target: Record<string, unknown> = {}
 
     installTraceDiagnostics(target, traces, true)
-    const exported = (target.__TOOLAIRLOCK_TRACE__ as any).exportJson()
+    const exported = (target.__WANDKIT_TRACE__ as any).exportJson()
     expect(exported).toContain('[redacted:length=')
     expect(exported).not.toContain('13800138000')
     expect(exported).not.toContain('secret')
 
     const productionTarget: Record<string, unknown> = {}
     installTraceDiagnostics(productionTarget, traces, false)
-    expect(productionTarget).not.toHaveProperty('__TOOLAIRLOCK_TRACE__')
+    expect(productionTarget).not.toHaveProperty('__WANDKIT_TRACE__')
   })
 })
 
@@ -54,6 +54,6 @@ describe('全局挂载名可覆盖', () => {
 
     expect(target.__MY_TRACE__).toBeDefined()
     expect(target[DEFAULT_TRACE_GLOBAL_KEY]).toBeUndefined()
-    expect(DEFAULT_TRACE_GLOBAL_KEY).toBe('__TOOLAIRLOCK_TRACE__')
+    expect(DEFAULT_TRACE_GLOBAL_KEY).toBe('__WANDKIT_TRACE__')
   })
 })

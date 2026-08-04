@@ -148,7 +148,7 @@ Agent 的操作常触发防抖保存一类的延迟请求，它们在遮罩解�
 
 ### 与真实 InteractionMask 的联调
 
-归属判定的整条依据建立在遮罩上，因此单测里接了 `@toolairlock/ui` 的真实实现，确认
+归属判定的整条依据建立在遮罩上，因此单测里接了 `@wandkit/ui` 的真实实现，确认
 `armed` 属性与本包假设一致。只测自己造的假遮罩，等于没测这条依据。
 
 ### 样例覆盖的五个场景
@@ -174,10 +174,10 @@ Agent 的操作常触发防抖保存一类的延迟请求，它们在遮罩解�
 需要 `confirmationId` 与 `rawRequest`——两者都不在 `RequestDisclosure` 里：前者由接线
 层生成，后者直接取自被拦下的请求。
 
-### 独立子入口：`@toolairlock/interceptor/confirm-ui`
+### 独立子入口：`@wandkit/interceptor/confirm-ui`
 
 实施中踩了一个坑：最初把 `createConfirmCardHandler` 从主入口 re-export，结果**任何
-一次 `import { createInterceptor }` 都会连带拉进 `@toolairlock/ui`**，而那个包在模块
+一次 `import { createInterceptor }` 都会连带拉进 `@wandkit/ui`**，而那个包在模块
 顶层就 `extends HTMLElement`——在没有 DOM 的环境里直接崩。
 
 「拦截器可脱离界面单独使用」这条设计就此作废，而且崩得莫名其妙（报错指向 UI 包，
@@ -201,7 +201,7 @@ Agent 的操作常触发防抖保存一类的延迟请求，它们在遮罩解�
 `npm run example:interceptor` 现在跑完六个场景，最后一幕接真实卡片：
 
 ```
-卡片元素: <toolairlock-confirm>   ← 来自 @toolairlock/ui
+卡片元素: <wandkit-confirm>   ← 来自 @wandkit/ui
 标题: 确认删除客户
 影响: 关联的坐席与话术将一并删除
 原始请求区块默认展开: true
@@ -219,7 +219,7 @@ Agent 的操作常触发防抖保存一类的延迟请求，它们在遮罩解�
 设计的，而那与 `AgentRuntime` 已有的循环会叠成两层——轮次上限、`maxToolCalls`、trace、
 超时预算全部失效。这条在 dom-capture.md §7 就已明确不采纳，端口设计与它自相矛盾。
 
-**目标已由 `@toolairlock/executor` 达成**：5 个通用 DOM 原语（read / click / input /
+**目标已由 `@wandkit/executor` 达成**：5 个通用 DOM 原语（read / click / input /
 select / scroll），循环仍在 `AgentRuntime` 手里，每一步都过工具调用，因此轮次上限、
 trace、闸门全部生效。已在真实后台跑通。
 

@@ -1,11 +1,11 @@
 /**
- * toolairlock —— in-app LLM Agent 的写操作治理层。
+ * wandkit —— in-app LLM Agent 的写操作治理层。
  *
  * 本包不解析 DOM、不调模型、不渲染界面。它提供的是 Agent 与真实写操作之间的那道闸：
  * 风险分级的工具契约、类型层面强制的两阶段写入、确认前的二次校验、权限过滤、
  * 写入不确定态建模，以及结构化审计。
  *
- * 测试期工具在 `toolairlock/testing` 下。
+ * 测试期工具在 `wandkit/testing` 下。
  */
 
 // ── 契约 ──────────────────────────────────────────────────────────
@@ -62,7 +62,7 @@ export {
 export type { LabeledLiteralOption } from './contracts/literalUnion'
 
 // ── 配置 ──────────────────────────────────────────────────────────
-export type { AirlockMessages } from './config/messages'
+export type { WandkitMessages } from './config/messages'
 export { defaultMessages, resolveMessages, formatMessage } from './config/messages'
 
 // ── 运行时 ────────────────────────────────────────────────────────

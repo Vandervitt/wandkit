@@ -538,7 +538,7 @@ describe('透传与生命周期', () => {
 
   it('外部同名 patch 元数据读取抛错时仍把它当作恢复边界', () => {
     const baselineFetch = window.fetch
-    const metadataSymbol = Symbol.for('@toolairlock/interceptor.patch')
+    const metadataSymbol = Symbol.for('@wandkit/interceptor.patch')
     const externalFetch = vi.fn(async () => new Response('{}', { status: 200 })) as typeof fetch
     Object.defineProperty(externalFetch, metadataSymbol, {
       get() { throw new Error('metadata denied') }

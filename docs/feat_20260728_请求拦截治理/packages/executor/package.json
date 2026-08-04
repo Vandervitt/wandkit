@@ -1,7 +1,7 @@
 {
-  "name": "@toolairlock/executor",
+  "name": "@wandkit/executor",
   "version": "0.1.0",
-  "description": "Generic DOM operation primitives for toolairlock. Lets an agent act on any page without declaring per-capability tools.",
+  "description": "Generic DOM operation primitives for wandkit. Lets an agent act on any page without declaring per-capability tools.",
   "license": "MIT",
   "type": "module",
   "sideEffects": false,
@@ -17,9 +17,9 @@
   },
   "files": ["dist"],
   "scripts": { "build": "tsup", "typecheck": "tsc --noEmit" },
-  "peerDependencies": { "toolairlock": "^0.1.0" },
+  "peerDependencies": { "wandkit": "^0.1.0" },
   "devDependencies": {
-    "toolairlock": "^0.1.0",
+    "wandkit": "^0.1.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0"
   },

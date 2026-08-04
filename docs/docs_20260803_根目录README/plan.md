@@ -122,7 +122,7 @@ Expected: 退出码为 0，证明这是新建文件，不会覆盖现有项目�
 Wandkit 是一个 TypeScript Monorepo，用于将 Agent Runtime、通用 DOM 操作、
 请求级安全闸门、聊天 UI 和可重复的网页任务评估组合到同一套工程体系中。
 
-> 当前 npm 包名仍沿用 `toolairlock` / `@toolairlock/*`；Wandkit 是项目和仓库名称。
+> npm 发布包统一使用 `wandkit` / `@wandkit/*` namespace。
 
 ## 核心能力
 
@@ -155,11 +155,11 @@ npm run example
 
 | 路径 | npm 包 / 用途 |
 | --- | --- |
-| [`packages/core`](packages/core) | `toolairlock`：Agent Runtime、工具契约、确认和轨迹 |
-| [`packages/executor`](packages/executor) | `@toolairlock/executor`：通用 DOM 操作与页面控制 |
-| [`packages/interceptor`](packages/interceptor) | `@toolairlock/interceptor`：请求级写操作拦截与授权 |
-| [`packages/chat`](packages/chat) | `@toolairlock/chat`：会话状态、聊天面板和 Runtime bridge |
-| [`packages/ui`](packages/ui) | `@toolairlock/ui`：确认卡片和交互遮罩 |
+| [`packages/core`](packages/core) | `wandkit`：Agent Runtime、工具契约、确认和轨迹 |
+| [`packages/executor`](packages/executor) | `@wandkit/executor`：通用 DOM 操作与页面控制 |
+| [`packages/interceptor`](packages/interceptor) | `@wandkit/interceptor`：请求级写操作拦截与授权 |
+| [`packages/chat`](packages/chat) | `@wandkit/chat`：会话状态、聊天面板和 Runtime bridge |
+| [`packages/ui`](packages/ui) | `@wandkit/ui`：确认卡片和交互遮罩 |
 | [`evals/page-agent`](evals/page-agent) | 网页任务完成率基线与报告 |
 | [`examples`](examples) | 确定性、真实模型、页面执行和聊天示例 |
 

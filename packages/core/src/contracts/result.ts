@@ -15,7 +15,7 @@ export interface ConfirmationRow {
  * 这是卡片上唯一不可能撒谎的部分：`title` / `rows` 那几行由映射逻辑或模型产出，
  * 都可能过时或写错，而 method + url + body 就是用户点下确认后要打到后端的东西本身。
  *
- * 与 `@toolairlock/ui` 的 `ConfirmCardRawRequest` 同形，可直接透传给确认卡片。
+ * 与 `@wandkit/ui` 的 `ConfirmCardRawRequest` 同形，可直接透传给确认卡片。
  */
 export interface ConfirmationRawRequest {
   method: string

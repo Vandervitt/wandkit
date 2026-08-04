@@ -1,5 +1,5 @@
 /**
- * `@toolairlock/interceptor` —— 请求层的兜底治理。
+ * `@wandkit/interceptor` —— 请求层的兜底治理。
  *
  * 核心包治理的是**已声明**的工具；本包治理的是**一切走网络的写**，包括从未被声明
  * 成工具的那些。两者是纵深关系，不是替代关系：
@@ -66,10 +66,10 @@ export type {
 export { createTraceRecorder } from './trace'
 export type { TraceCollectorLike, TraceRecorderOptions } from './trace'
 
-// 确认卡片接线在 `@toolairlock/interceptor/confirm-ui` 子入口，刻意不从主入口
-// re-export：它 import 了 `@toolairlock/ui`，而那个包在模块顶层就 `extends
+// 确认卡片接线在 `@wandkit/interceptor/confirm-ui` 子入口，刻意不从主入口
+// re-export：它 import 了 `@wandkit/ui`，而那个包在模块顶层就 `extends
 // HTMLElement`。从主入口导出会让任何一次 import 都连带拉进 UI 包并要求 DOM——
 // 拦截器要能在没有界面的场景下单独使用，这条不能破。
 
-// 自由执行器（ExecutorPort）已否决：能力去声明化由 `@toolairlock/executor` 的
+// 自由执行器（ExecutorPort）已否决：能力去声明化由 `@wandkit/executor` 的
 // 通用 DOM 原语达成，见 docs/feat_20260728_请求拦截治理/design.md §4.2。

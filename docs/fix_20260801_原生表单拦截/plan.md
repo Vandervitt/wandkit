@@ -45,7 +45,7 @@ Expected: PASS；记录当前 Fetch/XHR/Beacon 多实例、旧引用和外部 wr
 Create `packages/interceptor/src/patchLifecycle.ts` with:
 
 ```ts
-const PATCH_SOURCE = '@toolairlock/interceptor' as const
+const PATCH_SOURCE = '@wandkit/interceptor' as const
 const PATCH_METADATA = Symbol.for(`${PATCH_SOURCE}.patch`)
 
 export type PatchKind =
@@ -138,7 +138,7 @@ Run:
 
 ```bash
 npx vitest run packages/interceptor/src/interceptor.spec.ts packages/interceptor/src/channels.spec.ts
-npm run typecheck --workspace @toolairlock/interceptor
+npm run typecheck --workspace @wandkit/interceptor
 ```
 
 Expected: PASS；测试数量与抽取前一致，类型检查退出码为 0。
@@ -304,7 +304,7 @@ Start `packages/interceptor/src/form.ts` with these types and constants:
 import { markPatch, skipInactivePatches, type PatchLifecycle } from './patchLifecycle'
 import type { InterceptedRequest } from './types'
 
-const FORM_REGISTRY_SOURCE = '@toolairlock/interceptor' as const
+const FORM_REGISTRY_SOURCE = '@wandkit/interceptor' as const
 const FORM_REGISTRY = Symbol.for(`${FORM_REGISTRY_SOURCE}.form-registry`)
 
 type FormGate = (request: InterceptedRequest) => Promise<boolean>
@@ -1156,7 +1156,7 @@ Use assertions equivalent to:
 expect(externalSubmit).toHaveBeenCalledTimes(1)
 expect(confirm).toHaveBeenCalledTimes(1)
 expect(form.getAttribute('action')).toBe(originalActionAttribute)
-expect(form.querySelectorAll('input[data-toolairlock-replay]')).toHaveLength(0)
+expect(form.querySelectorAll('input[data-wandkit-replay]')).toHaveLength(0)
 ```
 
 - [ ] **Step 5: 实现安全重放**
@@ -1176,7 +1176,7 @@ function replaySubmission(
     input.type = 'hidden'
     input.name = entry.name
     input.value = entry.value
-    input.dataset.toolairlockReplay = ''
+    input.dataset.wandkitReplay = ''
     form.append(input)
     return input
   })
@@ -1294,7 +1294,7 @@ Change normal uninstall to run restores from last to first. Keep the per-install
 
 - [ ] **Step 4: 覆盖注册表冲突和属性读取异常**
 
-Add one test with `Object.defineProperty(window, Symbol.for('@toolairlock/interceptor.form-registry'), { value: {}, configurable: true })` and one with a throwing getter. Both must throw from install, restore earlier channels, leave the external property untouched, and report `installed === false`. Delete only the properties created by the tests in their `finally` blocks.
+Add one test with `Object.defineProperty(window, Symbol.for('@wandkit/interceptor.form-registry'), { value: {}, configurable: true })` and one with a throwing getter. Both must throw from install, restore earlier channels, leave the external property untouched, and report `installed === false`. Delete only the properties created by the tests in their `finally` blocks.
 
 - [ ] **Step 5: 运行事务与全包测试**
 
@@ -1303,7 +1303,7 @@ Run:
 ```bash
 npx vitest run packages/interceptor/src/form.spec.ts -t "安装失败|注册表"
 npx vitest run packages/interceptor/src
-npm run typecheck --workspace @toolairlock/interceptor
+npm run typecheck --workspace @wandkit/interceptor
 ```
 
 Expected: PASS，类型检查退出码为 0。
@@ -1407,7 +1407,7 @@ Run:
 
 ```bash
 npx vitest run packages/interceptor/src
-npm run typecheck --workspace @toolairlock/interceptor
+npm run typecheck --workspace @wandkit/interceptor
 ```
 
 Expected: PASS，两个命令退出码均为 0。

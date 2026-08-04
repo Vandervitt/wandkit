@@ -1,5 +1,5 @@
 import { cancelledResult, type ToolResult } from '../contracts/result'
-import { defaultMessages, type AirlockMessages } from '../config/messages'
+import { defaultMessages, type WandkitMessages } from '../config/messages'
 
 export { cancelledResult }
 
@@ -11,13 +11,13 @@ export { cancelledResult }
  * 原始 error 交给 trace 和控制台，用户只拿到可执行的一句话。
  */
 
-export function invalidJsonResult(messages: AirlockMessages = defaultMessages): ToolResult {
+export function invalidJsonResult(messages: WandkitMessages = defaultMessages): ToolResult {
   return { ok: false, message: messages.invalidJson }
 }
 
 export function invalidInputResult(
   _error: unknown,
-  messages: AirlockMessages = defaultMessages
+  messages: WandkitMessages = defaultMessages
 ): ToolResult {
   // 参数校验失败的原始 message 由 Ajv errorsText 生成，含 data.xxx 这类内部字段路径，
   // 直接展示既不可读又有轻微泄漏，因此统一归一为业务话术。
@@ -26,7 +26,7 @@ export function invalidInputResult(
 
 export function executionFailureResult(
   _error: unknown,
-  messages: AirlockMessages = defaultMessages
+  messages: WandkitMessages = defaultMessages
 ): ToolResult {
   return { ok: false, message: messages.executionFailure }
 }
@@ -39,7 +39,7 @@ export function executionFailureResult(
  */
 export function parseToolArguments(
   serialized: string,
-  messages: AirlockMessages = defaultMessages
+  messages: WandkitMessages = defaultMessages
 ):
   | { ok: true, value: unknown }
   | { ok: false, result: ToolResult } {

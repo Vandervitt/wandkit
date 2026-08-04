@@ -25,7 +25,7 @@ export interface NavigateAndWaitOptions {
 }
 
 /** 承载请求 ID 的路由 query 参数名的默认值；宿主页面据此读取当前同步请求。 */
-export const DEFAULT_REQUEST_ID_QUERY_KEY = 'airlockRequestId'
+export const DEFAULT_REQUEST_ID_QUERY_KEY = 'wandkitRequestId'
 
 /**
  * 驱动宿主路由，然后等待目标页面自报家门。

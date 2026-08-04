@@ -44,13 +44,13 @@ const BLOCKED_EVENTS = [
  * 与确认卡片同一套亮色液态玻璃语言：整块罩子是一层很淡的冷色薄纱（而不是压暗），
  * 状态提示是一颗浮在底部的玻璃胶囊。
  *
- * **`--tal-mask-blur` 默认是 0**。玻璃质感在这里只能由胶囊承担，罩子本身不许糊：用户
+ * **`--wandkit-mask-blur` 默认是 0**。玻璃质感在这里只能由胶囊承担，罩子本身不许糊：用户
  * 需要看清 Agent 在页面上做了什么，模糊掉业务内容等于把自动化过程变成黑箱，而看不见的
  * 自动化最难被信任。要模糊由宿主自己开，且那是宿主在为自己的取舍负责。
  *
  * 可用的 part：`overlay` `status` `dot` `label`
- * 可用的变量：`--tal-mask-bg` `--tal-mask-blur` `--tal-mask-label-bg`
- *   `--tal-mask-label-fg` `--tal-accent` `--tal-font`
+ * 可用的变量：`--wandkit-mask-bg` `--wandkit-mask-blur` `--wandkit-mask-label-bg`
+ *   `--wandkit-mask-label-fg` `--wandkit-accent` `--wandkit-font`
  */
 const STYLE = `
 :host { display: contents; }
@@ -62,11 +62,11 @@ const STYLE = `
   align-items: flex-end;
   justify-content: center;
   padding-bottom: 48px;
-  background: var(--tal-mask-bg, rgba(226, 234, 246, .44));
-  -webkit-backdrop-filter: blur(var(--tal-mask-blur, 0px)) saturate(1.04);
-  backdrop-filter: blur(var(--tal-mask-blur, 0px)) saturate(1.04);
+  background: var(--wandkit-mask-bg, rgba(226, 234, 246, .44));
+  -webkit-backdrop-filter: blur(var(--wandkit-mask-blur, 0px)) saturate(1.04);
+  backdrop-filter: blur(var(--wandkit-mask-blur, 0px)) saturate(1.04);
   cursor: progress;
-  font-family: var(--tal-font, system-ui, -apple-system, "PingFang SC", sans-serif);
+  font-family: var(--wandkit-font, system-ui, -apple-system, "PingFang SC", sans-serif);
 }
 [part="overlay"][data-transparent="true"] {
   background: transparent;
@@ -80,11 +80,11 @@ const STYLE = `
   max-width: 70vw;
   padding: 10px 17px;
   border-radius: 999px;
-  background: var(--tal-mask-label-bg, rgba(255, 255, 255, .74));
+  background: var(--wandkit-mask-label-bg, rgba(255, 255, 255, .74));
   -webkit-backdrop-filter: blur(24px) saturate(1.7);
   backdrop-filter: blur(24px) saturate(1.7);
   border: 1px solid rgba(255, 255, 255, .95);
-  color: var(--tal-mask-label-fg, #0f1729);
+  color: var(--wandkit-mask-label-fg, #0f1729);
   box-shadow: 0 18px 44px -20px rgba(15, 23, 41, .5);
 }
 [part="dot"] {
@@ -92,11 +92,11 @@ const STYLE = `
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--tal-accent, #0a84ff);
+  background: var(--wandkit-accent, #0a84ff);
   box-shadow: 0 0 0 4px rgba(10, 132, 255, .16);
-  animation: tal-mask-pulse 1.8s ease-in-out infinite;
+  animation: wandkit-mask-pulse 1.8s ease-in-out infinite;
 }
-@keyframes tal-mask-pulse { 50% { opacity: .35; box-shadow: 0 0 0 7px rgba(10, 132, 255, .06); } }
+@keyframes wandkit-mask-pulse { 50% { opacity: .35; box-shadow: 0 0 0 7px rgba(10, 132, 255, .06); } }
 @media (prefers-reduced-motion: reduce) { [part="dot"] { animation: none; } }
 [part="label"] {
   font-size: 13px;
@@ -110,10 +110,10 @@ const STYLE = `
 `
 
 /** 元素名。重复注册跳过，便于热更新与多次引入下保持幂等。 */
-export const MASK_TAG = 'toolairlock-mask'
+export const MASK_TAG = 'wandkit-mask'
 
 /** 遮罩的自定义元素外壳。生命周期由 {@link InteractionMask} 管理。 */
-export class ToolairlockMaskElement extends HTMLElement {
+export class WandkitMaskElement extends HTMLElement {
   readonly root: ShadowRoot
 
   constructor() {
@@ -123,7 +123,7 @@ export class ToolairlockMaskElement extends HTMLElement {
 }
 
 if (typeof customElements !== 'undefined' && !customElements.get(MASK_TAG)) {
-  customElements.define(MASK_TAG, ToolairlockMaskElement)
+  customElements.define(MASK_TAG, WandkitMaskElement)
 }
 
 /**
@@ -146,7 +146,7 @@ if (typeof customElements !== 'undefined' && !customElements.get(MASK_TAG)) {
  */
 export class InteractionMask {
   private readonly options: InteractionMaskOptions
-  private element: ToolairlockMaskElement | null = null
+  private element: WandkitMaskElement | null = null
   private labelNode: HTMLElement | null = null
   private statusNode: HTMLElement | null = null
   private label: string
@@ -170,7 +170,7 @@ export class InteractionMask {
   arm(): void {
     if (this.element) return
 
-    const host = document.createElement(MASK_TAG) as ToolairlockMaskElement
+    const host = document.createElement(MASK_TAG) as WandkitMaskElement
     const style = document.createElement('style')
     style.textContent = STYLE
 

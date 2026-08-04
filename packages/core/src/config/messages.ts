@@ -8,7 +8,7 @@
  * {@link ToolResult.cancelled}。一旦把文案和控制流耦合，翻译一句话就会静默
  * 改变执行行为。
  */
-export interface AirlockMessages {
+export interface WandkitMessages {
   /** 用户主动取消 Run，或明确拒绝了某次确认。 */
   cancelled: string
 
@@ -92,7 +92,7 @@ export interface AirlockMessages {
  * - 未知态和已提交态都必须显式带上「不要重复提交」；
  * - 文案要可执行——告诉用户下一步做什么，而不是描述哪里坏了。
  */
-export const defaultMessages: AirlockMessages = {
+export const defaultMessages: WandkitMessages = {
   cancelled: 'Cancelled by user.',
 
   invalidJson: 'The tool arguments were not valid JSON.',
@@ -136,7 +136,7 @@ export const defaultMessages: AirlockMessages = {
  *
  * 没有覆盖项时直接返回共享的 {@link defaultMessages}，让常见路径零分配。
  */
-export function resolveMessages(overrides?: Partial<AirlockMessages>): AirlockMessages {
+export function resolveMessages(overrides?: Partial<WandkitMessages>): WandkitMessages {
   return overrides ? { ...defaultMessages, ...overrides } : defaultMessages
 }
 

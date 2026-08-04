@@ -1,7 +1,7 @@
 /**
- * `@toolairlock/chat` 的两种用法。
+ * `@wandkit/chat` 的两种用法。
  *
- * 【一】完全独立：不装 toolairlock，只把 OpenAI 形态的消息喂给会话。
+ * 【一】完全独立：不装 wandkit，只把 OpenAI 形态的消息喂给会话。
  * 【二】接上核心：`AgentRuntime` 的事件经桥接层变成会话状态，写操作照样过闸门。
  *
  * 运行：npm run example:chat
@@ -44,8 +44,8 @@ function render(session: ChatSession): void {
   if (session.state.error) console.log(`  ⚠ ${session.state.error}`)
 }
 
-// ══ 用法一：完全独立，不需要 toolairlock ════════════════════════════
-line('【用法一】独立使用 —— 只喂 OpenAI 形态的数据，零 toolairlock 依赖')
+// ══ 用法一：完全独立，不需要 wandkit ════════════════════════════
+line('【用法一】独立使用 —— 只喂 OpenAI 形态的数据，零 wandkit 依赖')
 
 const standalone = new ChatSession()
 standalone.appendUser('帮我查一下待审核的用户')

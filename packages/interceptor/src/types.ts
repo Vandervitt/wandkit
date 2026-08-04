@@ -1,4 +1,4 @@
-import type { ConfirmationRow } from 'toolairlock'
+import type { ConfirmationRow } from 'wandkit'
 
 /** 请求走的是哪条浏览器通道。决定它能不能被挂起，见 {@link Interceptor}。 */
 export type RequestChannel = 'fetch' | 'xhr' | 'beacon' | 'form'
@@ -30,7 +30,7 @@ export interface InterceptedRequest {
  * 判定结论。
  *
  * `confirm` 携带风险等级而非文案——等级参与调度（`destructive` 会让卡片更重、
- * 原始请求默认展开），文案则一律由 `AirlockMessages` 提供。这与核心包
+ * 原始请求默认展开），文案则一律由 `WandkitMessages` 提供。这与核心包
  * 「绝不基于文案分支」的原则一致。
  */
 export type Verdict =

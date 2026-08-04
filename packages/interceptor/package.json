@@ -1,9 +1,9 @@
 {
-  "name": "@toolairlock/interceptor",
+  "name": "@wandkit/interceptor",
   "version": "0.1.0",
-  "description": "Default-deny request interception for toolairlock. Governs writes that were never declared as tools.",
+  "description": "Default-deny request interception for Wandkit. Governs writes that were never declared as tools.",
   "keywords": [
-    "toolairlock",
+    "wandkit",
     "human-in-the-loop",
     "guardrails",
     "interception"
@@ -38,14 +38,14 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "toolairlock": "^0.1.0",
-    "@toolairlock/ui": "^0.1.0"
+    "wandkit": "^0.1.0",
+    "@wandkit/ui": "^0.1.0"
   },
   "devDependencies": {
-    "toolairlock": "^0.1.0",
+    "wandkit": "^0.1.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
-    "@toolairlock/ui": "^0.1.0"
+    "@wandkit/ui": "^0.1.0"
   },
   "engines": {
     "node": ">=18"
@@ -58,7 +58,7 @@
     }
   },
   "peerDependenciesMeta": {
-    "@toolairlock/ui": {
+    "@wandkit/ui": {
       "optional": true
     }
   }

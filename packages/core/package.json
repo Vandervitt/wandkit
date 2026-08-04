@@ -1,7 +1,7 @@
 {
-  "name": "toolairlock",
+  "name": "wandkit",
   "version": "0.1.0",
-  "description": "Nothing writes without passing through the airlock. Risk-classified tools, two-phase writes and human confirmation for in-app LLM agents.",
+  "description": "Safe, observable tool execution with risk classification, two-phase writes and human confirmation for in-app LLM agents.",
   "keywords": [
     "llm",
     "agent",

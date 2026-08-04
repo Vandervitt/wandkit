@@ -1,9 +1,9 @@
-import { CONFIRM_CARD_TAG, type ConfirmCardData } from '@toolairlock/ui'
+import { CONFIRM_CARD_TAG, type ConfirmCardData } from '@wandkit/ui'
 import type { ConfirmRequestHandler } from './interceptor'
 import type { InterceptedRequest } from './types'
 
 /**
- * 把拦截器的确认请求接到 `@toolairlock/ui` 的确认卡片上。
+ * 把拦截器的确认请求接到 `@wandkit/ui` 的确认卡片上。
  *
  * 单独成一个文件，是因为**拦截器本身刻意不依赖 UI 包**：它要能在没有界面的场景下
  * 单独治理宿主代码。这层是可选接线，只有确实要用现成卡片时才引入。
