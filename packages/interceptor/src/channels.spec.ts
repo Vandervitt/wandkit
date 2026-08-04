@@ -121,7 +121,7 @@ describe('XMLHttpRequest', () => {
 
   it('等待确认期间重新 open 会使旧发送失效', async () => {
     let approveOld!: (allowed: boolean) => void
-    const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+    const confirm = vi.fn<ConfirmRequestHandler>(
       async () => true
     )
     confirm.mockImplementationOnce(() => new Promise<boolean>(resolve => {
@@ -158,7 +158,7 @@ describe('XMLHttpRequest', () => {
 
   it('即使参数相同，重新 open 也会使旧发送失效', async () => {
     let approveOld!: (allowed: boolean) => void
-    const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+    const confirm = vi.fn<ConfirmRequestHandler>(
       () => new Promise<boolean>(resolve => { approveOld = resolve })
     )
     setup({ confirm })
@@ -176,7 +176,7 @@ describe('XMLHttpRequest', () => {
 
   it('等待确认期间卸载会使旧发送失效', async () => {
     let approveOld!: (allowed: boolean) => void
-    const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+    const confirm = vi.fn<ConfirmRequestHandler>(
       () => new Promise<boolean>(resolve => { approveOld = resolve })
     )
     setup({ confirm })
@@ -196,7 +196,7 @@ describe('XMLHttpRequest', () => {
 
   it('旧卸载函数在重装后重复调用不会拆掉新安装', async () => {
     let approveOld!: (allowed: boolean) => void
-    const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+    const confirm = vi.fn<ConfirmRequestHandler>(
       () => new Promise<boolean>(resolve => { approveOld = resolve })
     )
     setup({ confirm })

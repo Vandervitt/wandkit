@@ -13,7 +13,7 @@ let uninstall: (() => void) | undefined
 let submitted: HTMLFormElement[]
 
 function setup(overrides: Partial<InterceptorOptions> = {}) {
-  const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+  const confirm = vi.fn<ConfirmRequestHandler>(
     async () => true
   )
   interceptor = createInterceptor({

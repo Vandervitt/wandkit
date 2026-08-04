@@ -15,7 +15,7 @@ function setup(
   overrides: Partial<InterceptorOptions> = {},
   policy: InterceptionPolicy = {}
 ) {
-  const confirm = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+  const confirm = vi.fn<ConfirmRequestHandler>(
     async () => true
   )
   interceptor = createInterceptor({
@@ -418,10 +418,10 @@ describe('透传与生命周期', () => {
   it('先卸载旧 Fetch 实例只移除该层，最后卸载恢复基线函数', async () => {
     const baselineFetch = window.fetch
     const order: string[] = []
-    const confirmA = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+    const confirmA = vi.fn<ConfirmRequestHandler>(
       async () => { order.push('A'); return true }
     )
-    const confirmB = vi.fn<Parameters<ConfirmRequestHandler>, Promise<boolean>>(
+    const confirmB = vi.fn<ConfirmRequestHandler>(
       async () => { order.push('B'); return true }
     )
     const instanceA = createInterceptor({

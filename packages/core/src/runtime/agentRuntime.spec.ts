@@ -38,9 +38,18 @@ const gatewayModule = {
   formatContext: () => ''
 }
 
-const readExecute = vi.fn<[ToolExecutionContext, { keyword: string }], Promise<ToolResult>>()
-const writePrepare = vi.fn<[ToolExecutionContext, { name: string }], Promise<PreparedAction>>()
-const writeExecute = vi.fn<[ToolExecutionContext, unknown], Promise<ToolResult>>()
+const readExecute = vi.fn<(
+  context: ToolExecutionContext,
+  input: { keyword: string }
+) => Promise<ToolResult>>()
+const writePrepare = vi.fn<(
+  context: ToolExecutionContext,
+  input: { name: string }
+) => Promise<PreparedAction>>()
+const writeExecute = vi.fn<(
+  context: ToolExecutionContext,
+  input: unknown
+) => Promise<ToolResult>>()
 
 function createTools() {
   const readTool = defineReadTool({
