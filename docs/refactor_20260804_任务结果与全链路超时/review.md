@@ -6,7 +6,7 @@
 
 ## 1. 评审结论
 
-当前实现符合已批准设计，可以提交到当前开发分支。自审未留下 Critical 或 Important 未解决项；发现的三个竞态/校验问题均先通过失败回归稳定复现，再完成修复和全量验证。
+当前实现符合已批准设计，可以提交到当前开发分支。自审未留下 Critical 或 Important 未解决项；发现的三个生产竞态/校验问题和一个测试时钟竞争均先通过失败回归稳定复现，再完成修复和全量验证。
 
 ## 2. 规格与架构核对
 
@@ -34,6 +34,7 @@
 | Important | `runtime/runDeadline.ts` | operation 排进微任务后若立刻 abort，真实操作仍会启动，`write_execution` 也会过早标记 | 在真实 operation 同一微任务内复查 signal，再调用 `onPhaseStart` 和 operation；2 条红灯转绿 |
 | Important | `runtime/traceCollector.ts` | Trace 只校验 outcome 字段，不校验其与终态 status 的映射 | 增加映射校验；`completed + failed outcome` 回归由红转绿，旧无 outcome Trace 保持兼容 |
 | Important | `execution/pageAdapterRegistry.ts` | signal 已 abort 且 Adapter 已挂载时，`waitFor` 会错误 resolve | 将 abort 检查前移到 mounted fast path 之前；回归由红转绿 |
+| Important | `runtime/agentRuntime.spec.ts` | 后置 phase 测试使用真实 5ms 共享总预算；并发负载下会在前置 phase 提前耗尽，导致全仓验证波动 | 12 路并行稳定复现 3 次失败；改为等待目标 operation 启动后推进 fake timer，同样压力下 12/12 通过 |
 
 ## 4. 代码质量与生产就绪性
 
@@ -61,7 +62,7 @@
 | 结论 | 状态 |
 |---|---|
 | Ready to commit | 是 |
-| Ready to merge | 代码与验证层面是；按项目规则由用户手动处理合入 |
+| Ready to merge | 代码与验证层面是；用户已授权 AI 本地 fast-forward 合入 `main`，不 push、不删除功能分支 |
 | 未解决 Critical | 0 |
 | 未解决 Important | 0 |
 | 已知测试警告 | 既有 jsdom `requestSubmit()` 提示，不影响 864 个用例通过 |

@@ -31,8 +31,11 @@
 | Trace 恢复回归（GREEN） | `npx vitest run packages/core/src/runtime/traceCollector.spec.ts` | 0 | 11 passed |
 | 已 abort 的 waiter 返回已挂载 Adapter（RED） | `npx vitest run packages/core/src/execution/actionRouter.spec.ts -t '不返回已挂载 Adapter'` | 1 | Promise 错误 resolve Adapter |
 | Adapter/ActionRouter 回归（GREEN） | `npx vitest run packages/core/src/execution/actionRouter.spec.ts` | 0 | 51 passed |
+| 后置 Deadline phase 使用真实 5ms 总预算（RED） | 12 路并行执行 `agentRuntime.spec.ts -t '首次 prepare 忽略 signal'` | 3/12 失败 | 超时提前漂移到 `page_context`、`prompt_composition`、`model_call` |
+| Deadline phase 确定性时钟（GREEN） | 同上 | 0/12 失败 | 等目标 operation 启动后推进 fake timer，12 路全部通过 |
+| AgentRuntime 回归 | `npx vitest run packages/core/src/runtime/agentRuntime.spec.ts` | 0 | 79 passed |
 
-以上红灯均由目标能力缺失触发，不是测试夹具、类型配置或语法错误；修复后对应全文件测试重新通过。
+前三组红灯均由目标能力缺失触发，不是测试夹具、类型配置或语法错误；最后一组红灯用于稳定复现测试自身的真实时钟竞争。生产逻辑未按个例打补丁，测试改为等目标 operation 确实启动后再推进共享 Deadline，修复后对应全文件测试重新通过。
 
 ## 3. 实施过程中的集成门槛
 

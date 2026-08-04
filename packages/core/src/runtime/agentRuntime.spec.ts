@@ -156,6 +156,38 @@ function expectTimedOut(
   )
 }
 
+function useDeterministicDeadlineClock(): void {
+  vi.useFakeTimers()
+  vi.setSystemTime(0)
+}
+
+function createHangingOperation<T>(): {
+  started: Promise<void>
+  run: () => Promise<T>
+} {
+  let markStarted: (() => void) | undefined
+  const started = new Promise<void>(resolve => {
+    markStarted = resolve
+  })
+  return {
+    started,
+    run: () => {
+      markStarted?.()
+      return new Promise<T>(() => undefined)
+    }
+  }
+}
+
+async function advanceToDeadline<T>(
+  running: Promise<T>,
+  operationStarted: Promise<void>,
+  budgetMs = 5
+): Promise<T> {
+  await operationStarted
+  await vi.advanceTimersByTimeAsync(budgetMs)
+  return running
+}
+
 describe('AgentRuntime', () => {
   beforeEach(() => {
     vi.resetAllMocks()
@@ -237,32 +269,55 @@ describe('AgentRuntime', () => {
   })
 
   it('getPageContext 忽略 signal 时在 page_context 超时', async() => {
+    useDeterministicDeadlineClock()
+    const hanging = createHangingOperation<null>()
     const { runtime } = createRuntime(new FakeLlm([finalReply()]), {
-      getPageContext: () => new Promise(() => undefined)
+      getPageContext: hanging.run
     }, { runTimeoutMs: 5 })
+    const running = runtime.start('查询')
 
-    expectTimedOut(await runtime.start('查询'), 'page_context', runtime)
+    expectTimedOut(
+      await advanceToDeadline(running, hanging.started),
+      'page_context',
+      runtime
+    )
   })
 
   it('composePrompt 忽略 signal 时在 prompt_composition 超时', async() => {
+    useDeterministicDeadlineClock()
+    const hanging = createHangingOperation<LlmMessage[]>()
     const { runtime } = createRuntime(new FakeLlm([finalReply()]), {
-      composePrompt: () => new Promise(() => undefined)
+      composePrompt: hanging.run
     }, { runTimeoutMs: 5 })
+    const running = runtime.start('查询')
 
-    expectTimedOut(await runtime.start('查询'), 'prompt_composition', runtime)
+    expectTimedOut(
+      await advanceToDeadline(running, hanging.started),
+      'prompt_composition',
+      runtime
+    )
   })
 
   it('LLM 忽略 signal 时在 model_call 超时', async() => {
+    useDeterministicDeadlineClock()
+    const hanging = createHangingOperation<LlmAssistantMessage>()
     const llm: LlmClient = {
-      chat: () => new Promise(() => undefined)
+      chat: hanging.run
     }
     const { runtime } = createRuntime(llm, {}, { runTimeoutMs: 5 })
+    const running = runtime.start('查询')
 
-    expectTimedOut(await runtime.start('查询'), 'model_call', runtime)
+    expectTimedOut(
+      await advanceToDeadline(running, hanging.started),
+      'model_call',
+      runtime
+    )
   })
 
   it('读工具忽略 signal 时在 read_execution 超时', async() => {
-    readExecute.mockImplementationOnce(() => new Promise(() => undefined))
+    useDeterministicDeadlineClock()
+    const hanging = createHangingOperation<ToolResult>()
+    readExecute.mockImplementationOnce(hanging.run)
     const { runtime } = createRuntime(new FakeLlm([
       toolReply({
         id: 'read-timeout',
@@ -270,8 +325,13 @@ describe('AgentRuntime', () => {
         args: '{"keyword":"x"}'
       })
     ]), {}, { runTimeoutMs: 5 })
+    const running = runtime.start('查询')
 
-    expectTimedOut(await runtime.start('查询'), 'read_execution', runtime)
+    expectTimedOut(
+      await advanceToDeadline(running, hanging.started),
+      'read_execution',
+      runtime
+    )
   })
 
   it('stop 先发生时立即结束忽略 signal 的 LLM', async() => {
@@ -309,9 +369,9 @@ describe('AgentRuntime', () => {
   })
 
   it('首次 prepare 忽略 signal 时在 write_preparation 超时', async() => {
-    writePrepare.mockImplementationOnce(
-      () => new Promise<PreparedAction>(() => undefined)
-    )
+    useDeterministicDeadlineClock()
+    const hanging = createHangingOperation<PreparedAction>()
+    writePrepare.mockImplementationOnce(hanging.run)
     const { runtime } = createRuntime(new FakeLlm([
       toolReply({
         id: 'prepare-timeout',
@@ -320,7 +380,8 @@ describe('AgentRuntime', () => {
       })
     ]), {}, { runTimeoutMs: 5 })
 
-    const snapshot = await runtime.start('更新')
+    const running = runtime.start('更新')
+    const snapshot = await advanceToDeadline(running, hanging.started)
 
     expectTimedOut(snapshot, 'write_preparation', runtime)
     expect(writeExecute).not.toHaveBeenCalled()
@@ -359,11 +420,11 @@ describe('AgentRuntime', () => {
   })
 
   it('确认后第二次 prepare 在 write_revalidation 超时', async() => {
+    useDeterministicDeadlineClock()
+    const hanging = createHangingOperation<PreparedAction>()
     writePrepare
       .mockResolvedValueOnce({ title: '更新', rows: [], payload: { id: 1 } })
-      .mockImplementationOnce(
-        () => new Promise<PreparedAction>(() => undefined)
-      )
+      .mockImplementationOnce(hanging.run)
     const { runtime } = createRuntime(new FakeLlm([
       toolReply({
         id: 'revalidate-timeout',
@@ -373,21 +434,22 @@ describe('AgentRuntime', () => {
     ]), {}, { runTimeoutMs: 5 })
     await runtime.start('更新')
 
-    const snapshot = await runtime.confirm(
+    const confirming = runtime.confirm(
       runtime.currentConfirmation()?.confirmationId as string
     )
+    const snapshot = await advanceToDeadline(confirming, hanging.started)
 
     expectTimedOut(snapshot, 'write_revalidation', runtime)
     expect(writeExecute).not.toHaveBeenCalled()
   })
 
   it('写执行忽略 signal 时按时返回 unknown 且禁止重试', async() => {
+    useDeterministicDeadlineClock()
+    const hanging = createHangingOperation<ToolResult>()
     writePrepare
       .mockResolvedValueOnce({ title: '更新', rows: [], payload: { id: 1 } })
       .mockResolvedValueOnce({ title: '更新', rows: [], payload: { id: 1 } })
-    writeExecute.mockImplementationOnce(
-      () => new Promise<ToolResult>(() => undefined)
-    )
+    writeExecute.mockImplementationOnce(hanging.run)
     const { runtime } = createRuntime(new FakeLlm([
       toolReply({
         id: 'write-timeout',
@@ -397,9 +459,10 @@ describe('AgentRuntime', () => {
     ]), {}, { runTimeoutMs: 5 })
     await runtime.start('更新')
 
-    const snapshot = await runtime.confirm(
+    const confirming = runtime.confirm(
       runtime.currentConfirmation()?.confirmationId as string
     )
+    const snapshot = await advanceToDeadline(confirming, hanging.started)
 
     expect(snapshot).toMatchObject({
       status: 'failed',
@@ -485,9 +548,9 @@ describe('AgentRuntime', () => {
   })
 
   it('读超时时为同一 reply 的每个 tool_call_id 只补一条结果', async() => {
-    readExecute.mockImplementationOnce(
-      () => new Promise<ToolResult>(() => undefined)
-    )
+    useDeterministicDeadlineClock()
+    const hanging = createHangingOperation<ToolResult>()
+    readExecute.mockImplementationOnce(hanging.run)
     const { runtime } = createRuntime(new FakeLlm([
       toolReply(
         {
@@ -503,7 +566,8 @@ describe('AgentRuntime', () => {
       )
     ]), {}, { runTimeoutMs: 5 })
 
-    const snapshot = await runtime.start('查询')
+    const running = runtime.start('查询')
+    const snapshot = await advanceToDeadline(running, hanging.started)
 
     expectTimedOut(snapshot, 'read_execution', runtime)
     const toolMessages = runtime.history.filter(message => message.role === 'tool')
