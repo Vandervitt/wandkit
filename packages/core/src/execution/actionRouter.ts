@@ -1,4 +1,5 @@
 import { resolveMessages, type AirlockMessages } from '../config/messages'
+import type { DeadlineScope, RunDeadlinePhase } from '../contracts/deadline'
 import type { PageAdapter } from '../contracts/pageAdapter'
 import { cancelledResult, type PreparedAction, type ToolResult, type UiEffect } from '../contracts/result'
 import type { ToolDefinition, ToolExecutionContext } from '../contracts/tool'
@@ -23,6 +24,8 @@ export interface ExecuteActionOptions {
   prepared?: PreparedAction
   /** 本次动作的页面同步请求 ID，用于仲裁新旧请求。 */
   requestId: string
+  /** Runtime 级共享 Deadline；直接使用 ActionRouter 的宿主可省略。 */
+  deadline?: DeadlineScope
 }
 
 /** 一次进行中的页面同步请求的定位信息。 */
@@ -151,7 +154,11 @@ export class ActionRouter {
       adapter = await this.dependencies.navigation.navigateAndWait(
         pageSync.moduleId,
         pageSync.routeName,
-        options.requestId
+        options.requestId,
+        {
+          signal: options.context.signal,
+          deadline: options.deadline
+        }
       )
     } catch (error) {
       if (options.context.signal?.aborted) {
@@ -199,7 +206,11 @@ export class ActionRouter {
       const adapter = await this.dependencies.navigation.navigateAndWait(
         pageSync.moduleId,
         pageSync.routeName,
-        options.requestId
+        options.requestId,
+        {
+          signal: options.context.signal,
+          deadline: options.deadline
+        }
       )
       if (options.context.signal?.aborted) {
         this.invalidatePageSync(pageSync)
@@ -246,7 +257,11 @@ export class ActionRouter {
     options: ExecuteActionOptions
   ): Promise<ToolResult> {
     try {
-      const result = await this.executeTool(options)
+      const result = await this.runWithDeadline(
+        options,
+        this.executionPhase(options),
+        () => this.executeTool(options)
+      )
       return options.context.signal?.aborted
         ? this.resultAfterAbort(options, result)
         : result
@@ -280,14 +295,42 @@ export class ActionRouter {
     return options.tool.risk === 'write' || options.tool.risk === 'destructive'
   }
 
+  private executionPhase(options: ExecuteActionOptions): RunDeadlinePhase {
+    if (this.isWrite(options)) return 'write_execution'
+    return options.tool.risk === 'navigation'
+      ? 'navigation_execution'
+      : 'read_execution'
+  }
+
+  private runWithDeadline<T>(
+    options: ExecuteActionOptions,
+    phase: RunDeadlinePhase,
+    operation: () => T | Promise<T>
+  ): Promise<T> {
+    if (options.deadline) return options.deadline.run(phase, operation)
+    try {
+      return Promise.resolve(operation())
+    } catch (error) {
+      return Promise.reject(error)
+    }
+  }
+
   /** 把 uiEffect 投递给页面，成功后把该页面同步请求标记为 completed。 */
   private async applyEffect(
+    options: ExecuteActionOptions,
     result: ToolResult,
     adapter: PageAdapter,
-    requestId: string,
     pageSync?: PageSyncRequest
   ): Promise<ToolResult> {
-    await adapter.applyUiEffect(result.uiEffect as UiEffect, requestId)
+    await this.runWithDeadline(options, 'ui_effect', () => (
+      options.context.signal
+        ? adapter.applyUiEffect(
+          result.uiEffect as UiEffect,
+          options.requestId,
+          options.context.signal
+        )
+        : adapter.applyUiEffect(result.uiEffect as UiEffect, options.requestId)
+    ))
     if (pageSync) {
       this.dependencies.adapters.completeRequest(
         pageSync.moduleId,
@@ -311,7 +354,7 @@ export class ActionRouter {
   ): Promise<ToolResult> {
     try {
       if (!this.isLatestPageSync(pageSync)) return this.expiredPageSyncResult()
-      return await this.applyEffect(result, adapter, options.requestId, pageSync)
+      return await this.applyEffect(options, result, adapter, pageSync)
     } catch (error) {
       if (options.context.signal?.aborted) {
         this.invalidatePageSync(pageSync)

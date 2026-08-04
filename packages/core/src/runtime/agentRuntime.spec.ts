@@ -1,6 +1,8 @@
 import { Type } from '@sinclair/typebox'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { RunDeadlinePhase } from '../contracts/deadline'
 import type { LlmAssistantMessage, LlmClient, LlmMessage } from '../contracts/llm'
+import type { RunSnapshot } from '../contracts/run'
 import {
   ToolPreparationError,
   ToolPreparationNotice,
@@ -10,10 +12,13 @@ import {
 import {
   defineReadTool,
   defineWriteTool,
-  type ToolDefinition,
   type ToolExecutionContext
 } from '../contracts/tool'
-import { ActionRouter } from '../execution/actionRouter'
+import {
+  ActionRouter,
+  type ExecuteActionOptions
+} from '../execution/actionRouter'
+import { NavigationCoordinator } from '../execution/navigationCoordinator'
 import { PageAdapterRegistry } from '../execution/pageAdapterRegistry'
 import { createToolRegistry } from '../registry/toolRegistry'
 import { FakeLlm } from '../testing/fakeLlm'
@@ -81,14 +86,33 @@ function createRuntime(
 ) {
   const { readTool, writeTool } = createTools()
   const registry = createToolRegistry([gatewayModule], [readTool, writeTool])
-  const execute = vi.fn(async(options: {
-    tool: ToolDefinition
-    prepared?: PreparedAction
-  }) => {
-    if (options.tool.risk === 'write') {
-      return writeExecute({} as ToolExecutionContext, options.prepared?.payload)
+  const execute = vi.fn(async(options: ExecuteActionOptions) => {
+    const operation = () => options.tool.risk === 'write'
+      ? writeExecute({} as ToolExecutionContext, options.prepared?.payload)
+      : readExecute({} as ToolExecutionContext, { keyword: '默认' })
+    const phase: RunDeadlinePhase = options.tool.risk === 'write'
+      ? 'write_execution'
+      : options.tool.risk === 'navigation'
+        ? 'navigation_execution'
+        : 'read_execution'
+    try {
+      return options.deadline
+        ? await options.deadline.run(phase, operation)
+        : await operation()
+    } catch (error) {
+      if (!options.context.signal?.aborted) throw error
+      return options.tool.risk === 'write'
+        ? {
+            ok: false,
+            message: defaultMessages.writeStateUnknown,
+            writeState: 'unknown'
+          }
+        : {
+            ok: false,
+            message: defaultMessages.cancelled,
+            cancelled: true
+          }
     }
-    return readExecute({} as ToolExecutionContext, { keyword: '默认' })
   })
   const emit = vi.fn()
   const dependencies: AgentRuntimeDependencies = {
@@ -106,9 +130,392 @@ function createRuntime(
   return { runtime: new AgentRuntime(dependencies, options), execute, emit }
 }
 
+function expectTimedOut(
+  snapshot: RunSnapshot,
+  expectedPhase: RunDeadlinePhase,
+  runtime: AgentRuntime
+): void {
+  expect(snapshot).toMatchObject({
+    status: 'failed',
+    outcome: {
+      kind: 'timed_out',
+      error: {
+        code: 'RUN_DEADLINE_EXCEEDED',
+        phase: expectedPhase,
+        budgetMs: 5,
+        retryable: true
+      }
+    }
+  })
+  expect(runtime.traces.recent().at(-1)?.events).toContainEqual(
+    expect.objectContaining({
+      type: 'deadline_exceeded',
+      phase: expectedPhase,
+      budgetMs: 5
+    })
+  )
+}
+
 describe('AgentRuntime', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('正常收敛只表示 completed，不表示业务成功', async() => {
+    const { runtime } = createRuntime(new FakeLlm([finalReply('已回答')]))
+
+    await expect(runtime.start('查询')).resolves.toMatchObject({
+      status: 'completed',
+      outcome: { kind: 'completed' }
+    })
+  })
+
+  it('工具明确缺用户信息时产生 needs_input outcome', async() => {
+    readExecute.mockResolvedValueOnce({
+      ok: false,
+      message: '请补充公司 ID。',
+      needsUserInput: true
+    })
+    const { runtime } = createRuntime(new FakeLlm([
+      toolReply({
+        id: 'need-input',
+        name: 'gateway_query_v1',
+        args: '{"keyword":"x"}'
+      }),
+      finalReply('请告诉我公司 ID。')
+    ]))
+
+    await expect(runtime.start('查询')).resolves.toMatchObject({
+      status: 'completed',
+      outcome: { kind: 'needs_input' }
+    })
+  })
+
+  it('snapshot outcome 是深拷贝', async() => {
+    const { runtime } = createRuntime(
+      new FakeLlm([]),
+      {},
+      { maxRounds: 0 }
+    )
+    const first = await runtime.start('超过轮次')
+    if (first.outcome?.kind === 'failed') {
+      first.outcome.error.message = 'tampered'
+    }
+
+    expect(runtime.snapshot().outcome).toMatchObject({
+      kind: 'failed',
+      error: { code: 'MAX_ROUNDS_REACHED' }
+    })
+    expect(runtime.snapshot().outcome).not.toMatchObject({
+      kind: 'failed',
+      error: { message: 'tampered' }
+    })
+  })
+
+  it('未预期 Runtime 异常产生 RUNTIME_FAILED outcome', async() => {
+    const { runtime } = createRuntime(new FakeLlm([finalReply()]), {
+      composePrompt: async() => {
+        throw new Error('prompt unavailable')
+      }
+    })
+
+    await expect(runtime.start('查询')).resolves.toMatchObject({
+      status: 'failed',
+      outcome: {
+        kind: 'failed',
+        error: {
+          code: 'RUNTIME_FAILED',
+          retryable: true,
+          message: expect.stringContaining('prompt unavailable')
+        }
+      }
+    })
+  })
+
+  it('getPageContext 忽略 signal 时在 page_context 超时', async() => {
+    const { runtime } = createRuntime(new FakeLlm([finalReply()]), {
+      getPageContext: () => new Promise(() => undefined)
+    }, { runTimeoutMs: 5 })
+
+    expectTimedOut(await runtime.start('查询'), 'page_context', runtime)
+  })
+
+  it('composePrompt 忽略 signal 时在 prompt_composition 超时', async() => {
+    const { runtime } = createRuntime(new FakeLlm([finalReply()]), {
+      composePrompt: () => new Promise(() => undefined)
+    }, { runTimeoutMs: 5 })
+
+    expectTimedOut(await runtime.start('查询'), 'prompt_composition', runtime)
+  })
+
+  it('LLM 忽略 signal 时在 model_call 超时', async() => {
+    const llm: LlmClient = {
+      chat: () => new Promise(() => undefined)
+    }
+    const { runtime } = createRuntime(llm, {}, { runTimeoutMs: 5 })
+
+    expectTimedOut(await runtime.start('查询'), 'model_call', runtime)
+  })
+
+  it('读工具忽略 signal 时在 read_execution 超时', async() => {
+    readExecute.mockImplementationOnce(() => new Promise(() => undefined))
+    const { runtime } = createRuntime(new FakeLlm([
+      toolReply({
+        id: 'read-timeout',
+        name: 'gateway_query_v1',
+        args: '{"keyword":"x"}'
+      })
+    ]), {}, { runTimeoutMs: 5 })
+
+    expectTimedOut(await runtime.start('查询'), 'read_execution', runtime)
+  })
+
+  it('stop 先发生时立即结束忽略 signal 的 LLM', async() => {
+    let started: (() => void) | undefined
+    const requestStarted = new Promise<void>(resolve => { started = resolve })
+    const llm: LlmClient = {
+      chat: () => {
+        started?.()
+        return new Promise(() => undefined)
+      }
+    }
+    const { runtime } = createRuntime(llm, {}, { runTimeoutMs: 60000 })
+    const running = runtime.start('停止')
+    await requestStarted
+
+    runtime.stop()
+
+    await expect(running).resolves.toMatchObject({
+      status: 'cancelled',
+      outcome: { kind: 'cancelled', reason: 'user_stopped' }
+    })
+  })
+
+  it('Deadline 已发生时 stop 不覆盖 timed_out', async() => {
+    const llm: LlmClient = {
+      chat: () => new Promise(() => undefined)
+    }
+    const { runtime } = createRuntime(llm, {}, { runTimeoutMs: 5 })
+    const result = await runtime.start('超时')
+
+    runtime.stop()
+
+    expect(result.outcome).toMatchObject({ kind: 'timed_out' })
+    expect(runtime.snapshot().outcome).toMatchObject({ kind: 'timed_out' })
+  })
+
+  it('首次 prepare 忽略 signal 时在 write_preparation 超时', async() => {
+    writePrepare.mockImplementationOnce(
+      () => new Promise<PreparedAction>(() => undefined)
+    )
+    const { runtime } = createRuntime(new FakeLlm([
+      toolReply({
+        id: 'prepare-timeout',
+        name: 'gateway_update_v1',
+        args: '{"name":"x"}'
+      })
+    ]), {}, { runTimeoutMs: 5 })
+
+    const snapshot = await runtime.start('更新')
+
+    expectTimedOut(snapshot, 'write_preparation', runtime)
+    expect(writeExecute).not.toHaveBeenCalled()
+  })
+
+  it('确认等待和错误 ID 都不消耗主动预算', async() => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    writePrepare
+      .mockResolvedValueOnce({ title: '更新', rows: [], payload: { id: 1 } })
+      .mockResolvedValueOnce({ title: '更新', rows: [], payload: { id: 1 } })
+    writeExecute.mockResolvedValueOnce({
+      ok: true,
+      message: 'saved',
+      writeState: 'committed'
+    })
+    const { runtime } = createRuntime(new FakeLlm([
+      toolReply({
+        id: 'paused-write',
+        name: 'gateway_update_v1',
+        args: '{"name":"x"}'
+      }),
+      finalReply('完成')
+    ]), {}, { runTimeoutMs: 100 })
+    const waiting = await runtime.start('更新')
+    const confirmationId = runtime.currentConfirmation()?.confirmationId as string
+    expect(waiting.status).toBe('awaiting_confirmation')
+
+    vi.setSystemTime(60000)
+    await expect(runtime.confirm('wrong-id')).rejects.toThrow()
+    vi.setSystemTime(120000)
+    await expect(runtime.confirm(confirmationId)).resolves.toMatchObject({
+      status: 'completed',
+      outcome: { kind: 'completed' }
+    })
+  })
+
+  it('确认后第二次 prepare 在 write_revalidation 超时', async() => {
+    writePrepare
+      .mockResolvedValueOnce({ title: '更新', rows: [], payload: { id: 1 } })
+      .mockImplementationOnce(
+        () => new Promise<PreparedAction>(() => undefined)
+      )
+    const { runtime } = createRuntime(new FakeLlm([
+      toolReply({
+        id: 'revalidate-timeout',
+        name: 'gateway_update_v1',
+        args: '{"name":"x"}'
+      })
+    ]), {}, { runTimeoutMs: 5 })
+    await runtime.start('更新')
+
+    const snapshot = await runtime.confirm(
+      runtime.currentConfirmation()?.confirmationId as string
+    )
+
+    expectTimedOut(snapshot, 'write_revalidation', runtime)
+    expect(writeExecute).not.toHaveBeenCalled()
+  })
+
+  it('写执行忽略 signal 时按时返回 unknown 且禁止重试', async() => {
+    writePrepare
+      .mockResolvedValueOnce({ title: '更新', rows: [], payload: { id: 1 } })
+      .mockResolvedValueOnce({ title: '更新', rows: [], payload: { id: 1 } })
+    writeExecute.mockImplementationOnce(
+      () => new Promise<ToolResult>(() => undefined)
+    )
+    const { runtime } = createRuntime(new FakeLlm([
+      toolReply({
+        id: 'write-timeout',
+        name: 'gateway_update_v1',
+        args: '{"name":"x"}'
+      })
+    ]), {}, { runTimeoutMs: 5 })
+    await runtime.start('更新')
+
+    const snapshot = await runtime.confirm(
+      runtime.currentConfirmation()?.confirmationId as string
+    )
+
+    expect(snapshot).toMatchObject({
+      status: 'failed',
+      outcome: {
+        kind: 'timed_out',
+        error: {
+          phase: 'write_execution',
+          retryable: false,
+          writeState: 'unknown'
+        }
+      }
+    })
+    expect(runtime.history).toContainEqual(expect.objectContaining({
+      role: 'tool',
+      tool_call_id: 'write-timeout',
+      content: expect.stringContaining('"writeState":"unknown"')
+    }))
+  })
+
+  it('写入 committed 后 UI effect 超时保留已提交状态', async() => {
+    let effectStarted: (() => void) | undefined
+    const started = new Promise<void>(resolve => { effectStarted = resolve })
+    const adapters = new PageAdapterRegistry()
+    adapters.register({
+      moduleId: 'gateway',
+      routeName: 'Gateway-managemnet',
+      getContext: () => ({}),
+      applyUiEffect: () => {
+        effectStarted?.()
+        return new Promise<void>(() => undefined)
+      }
+    })
+    const navigation = new NavigationCoordinator({
+      getCurrentRouteName: () => 'Gateway-managemnet',
+      push: async() => undefined
+    }, adapters)
+    const actionRouter = new ActionRouter({
+      adapters,
+      navigation,
+      resolveRouteName: () => 'Gateway-managemnet'
+    })
+    const committed: ToolResult = {
+      ok: true,
+      message: 'saved',
+      writeState: 'committed',
+      uiEffect: { type: 'gateway:refresh' }
+    }
+    writePrepare
+      .mockResolvedValueOnce({ title: '更新', rows: [], payload: { id: 1 } })
+      .mockResolvedValueOnce({ title: '更新', rows: [], payload: { id: 1 } })
+    writeExecute.mockResolvedValueOnce(committed)
+    const { runtime } = createRuntime(new FakeLlm([
+      toolReply({
+        id: 'committed-effect-timeout',
+        name: 'gateway_update_v1',
+        args: '{"name":"x"}'
+      })
+    ]), { actionRouter }, { runTimeoutMs: 30 })
+    await runtime.start('更新')
+
+    const confirming = runtime.confirm(
+      runtime.currentConfirmation()?.confirmationId as string
+    )
+    await started
+    const snapshot = await confirming
+
+    expect(snapshot).toMatchObject({
+      status: 'failed',
+      outcome: {
+        kind: 'timed_out',
+        error: {
+          phase: 'ui_effect',
+          retryable: false,
+          writeState: 'committed'
+        }
+      }
+    })
+    expect(runtime.history).toContainEqual(expect.objectContaining({
+      role: 'tool',
+      tool_call_id: 'committed-effect-timeout',
+      content: expect.stringContaining('"writeState":"committed"')
+    }))
+  })
+
+  it('读超时时为同一 reply 的每个 tool_call_id 只补一条结果', async() => {
+    readExecute.mockImplementationOnce(
+      () => new Promise<ToolResult>(() => undefined)
+    )
+    const { runtime } = createRuntime(new FakeLlm([
+      toolReply(
+        {
+          id: 'read-timeout',
+          name: 'gateway_query_v1',
+          args: '{"keyword":"one"}'
+        },
+        {
+          id: 'read-skipped',
+          name: 'gateway_query_v1',
+          args: '{"keyword":"two"}'
+        }
+      )
+    ]), {}, { runTimeoutMs: 5 })
+
+    const snapshot = await runtime.start('查询')
+
+    expectTimedOut(snapshot, 'read_execution', runtime)
+    const toolMessages = runtime.history.filter(message => message.role === 'tool')
+    const toolIds = toolMessages.map(message => message.tool_call_id)
+    expect(toolIds).toEqual(['read-timeout', 'read-skipped'])
+    expect(new Set(toolIds).size).toBe(2)
+    expect(toolMessages[0].content).toContain(
+      formatMessage(defaultMessages.runTimeout, { ms: 5 })
+    )
+    expect(toolMessages[1].content).toContain(
+      formatMessage(defaultMessages.runTimeout, { ms: 5 })
+    )
   })
 
   it('从已恢复 Trace 的最大序号继续生成 Run ID', async() => {
@@ -278,6 +685,10 @@ describe('AgentRuntime', () => {
     const result = await runtime.start('查询')
 
     expect(result.status).toBe('failed')
+    expect(result.outcome).toMatchObject({
+      kind: 'failed',
+      error: { code: 'TOOL_FAILED', retryable: false }
+    })
     expect(execute).toHaveBeenCalledTimes(1)
     expect(llm.requests).toHaveLength(1)
     expect(emit).toHaveBeenCalledWith(expect.objectContaining({
@@ -587,7 +998,11 @@ describe('AgentRuntime', () => {
   })
 
   it.each([
-    ['success', 'resolve', { ok: true, message: '更新成功' }, { ok: true, message: '更新成功' }],
+    ['success', 'resolve', { ok: true, message: '更新成功' }, {
+      ok: false,
+      message: defaultMessages.writeStateUnknown,
+      writeState: 'unknown'
+    }],
     ['failed', 'resolve', { ok: false, message: '业务失败' }, {
       ok: false,
       message: defaultMessages.writeStateUnknown,
@@ -599,7 +1014,7 @@ describe('AgentRuntime', () => {
       writeState: 'unknown'
     }]
   ] as const)(
-    '确认写请求发出后 stop，%s 结果仍通知 UI',
+    '确认写请求发出后 stop，%s 迟到结果统一以 unknown 通知 UI',
     async(_case, settlement, toolResult, expectedResult) => {
       let finishWrite: ((result: ToolResult) => void) | undefined
       let rejectWrite: ((error: Error) => void) | undefined
@@ -896,6 +1311,10 @@ describe('AgentRuntime', () => {
     const result = await runtime.start('循环查询')
 
     expect(result.status).toBe('failed')
+    expect(result.outcome).toMatchObject({
+      kind: 'failed',
+      error: { code: 'MAX_ROUNDS_REACHED', retryable: false }
+    })
     expect(llm.requests).toHaveLength(6)
     // maxRounds 命中时上一轮工具已补齐结果，不得对已完成的 tool_call_id 重复追加，
     // 否则同一 tool_call_id 会出现两条 tool 消息（协议非法）。
@@ -933,6 +1352,10 @@ describe('AgentRuntime', () => {
     const result = await runtime.start('执行很多工具')
 
     expect(result.status).toBe('failed')
+    expect(result.outcome).toMatchObject({
+      kind: 'failed',
+      error: { code: 'MAX_TOOL_CALLS_REACHED', retryable: false }
+    })
     expect(execute).toHaveBeenCalledTimes(12)
     expect(runtime.history.at(-1)).toEqual(expect.objectContaining({
       role: 'tool', tool_call_id: 'call-12', content: expect.stringContaining(formatMessage(defaultMessages.maxToolCallsReached, { limit: 12 }))
@@ -1128,6 +1551,10 @@ describe('AgentRuntime', () => {
     const result = await running
 
     expect(result.status).toBe('cancelled')
+    expect(result.outcome).toEqual({
+      kind: 'cancelled',
+      reason: 'user_stopped'
+    })
     expect(runtime.history).toEqual(before)
     expect(runtime.traces.recent()[0].stopReason).toBe(defaultMessages.stoppedByUser)
   })

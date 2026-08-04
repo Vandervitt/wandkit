@@ -182,6 +182,27 @@ describe('运行时事件 → 会话状态', () => {
     expect(session.state.error).toBe('达到最大轮次')
   })
 
+  it('失败终态优先展示结构化 outcome 文案', () => {
+    const { runtime, onEvent } = createRuntime()
+    connectRuntime(session, runtime, { onEvent })
+
+    runtime.emit({
+      type: 'state',
+      snapshot: {
+        runId: 'r',
+        traceId: 't',
+        status: 'failed',
+        outcome: {
+          kind: 'timed_out',
+          error: { message: '结构化超时文案' }
+        }
+      },
+      stopReason: '旧文案'
+    })
+
+    expect(session.state.error).toBe('结构化超时文案')
+  })
+
   it('失败终态没带原因时也必须留下可见的错误', () => {
     // 真实接入实测的缺陷根因：核心的 `state` 事件从来不带 `stopReason`（原因只进
     // trace），于是每一次失败都落到「静静切回 idle」这条路上。用户看到的是发一句话、

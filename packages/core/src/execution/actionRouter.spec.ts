@@ -1,5 +1,6 @@
 import { Type } from '@sinclair/typebox'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { DeadlineScope, RunDeadlinePhase } from '../contracts/deadline'
 import type { PageAdapter } from '../contracts/pageAdapter'
 import type { PreparedAction, ToolResult, UiEffect } from '../contracts/result'
 import type { ToolDefinition, ToolExecutionContext } from '../contracts/tool'
@@ -49,6 +50,19 @@ function createActionRouter(
     navigation: new NavigationCoordinator(routerPort, registry, timeoutMs),
     resolveRouteName: () => routeName
   })
+}
+
+function recordingDeadline(phases: RunDeadlinePhase[]): DeadlineScope {
+  return {
+    remainingMs: () => 1000,
+    run: async<T>(
+      phase: RunDeadlinePhase,
+      operation: () => T | Promise<T>
+    ) => {
+      phases.push(phase)
+      return operation()
+    }
+  }
 }
 
 const showQueryEffect: UiEffect = {
@@ -116,6 +130,41 @@ describe('PageAdapterRegistry', () => {
 
     await expect(registry.waitFor('gateway', routeName, requestId, 5))
       .rejects.toThrow('Timed out waiting for page: gateway/Gateway-managemnet (request-7)')
+  })
+
+  it('waitFor 在 signal abort 时立即移除 waiter', async() => {
+    const controller = new AbortController()
+    const registry = new PageAdapterRegistry()
+    const waiting = registry.waitFor(
+      'gateway',
+      routeName,
+      requestId,
+      5000,
+      controller.signal
+    )
+
+    controller.abort(Object.assign(new Error('stopped'), { name: 'AbortError' }))
+
+    await expect(waiting).rejects.toMatchObject({ name: 'AbortError' })
+    const waiters = (registry as unknown as {
+      waiters: Map<string, Set<unknown>>
+    }).waiters
+    expect(waiters.size).toBe(0)
+  })
+
+  it('waitFor 调用前 signal 已 abort 时不返回已挂载 Adapter', async() => {
+    const controller = new AbortController()
+    const registry = new PageAdapterRegistry()
+    registry.register(createAdapter())
+    controller.abort(Object.assign(new Error('stopped'), { name: 'AbortError' }))
+
+    await expect(registry.waitFor(
+      'gateway',
+      routeName,
+      requestId,
+      5000,
+      controller.signal
+    )).rejects.toMatchObject({ name: 'AbortError' })
   })
 
   it('只有最新页面同步请求可以完成', () => {
@@ -246,6 +295,20 @@ describe('PageAdapterRegistry', () => {
 })
 
 describe('NavigationCoordinator', () => {
+  it('未传 Deadline 时保持同步发起 router.push', async() => {
+    const registry = new PageAdapterRegistry()
+    const adapter = createAdapter()
+    const routerPort = createRouterPort({
+      push: vi.fn(async() => { registry.register(adapter) })
+    })
+    const navigation = new NavigationCoordinator(routerPort, registry, 50)
+
+    const navigating = navigation.navigateAndWait('gateway', routeName, requestId)
+
+    expect(routerPort.push).toHaveBeenCalledTimes(1)
+    await expect(navigating).resolves.toBe(adapter)
+  })
+
   it('导航时传递 requestId，并等待对应 Adapter', async() => {
     const registry = new PageAdapterRegistry()
     const adapter = createAdapter()
@@ -298,6 +361,148 @@ describe('NavigationCoordinator', () => {
 })
 
 describe('ActionRouter A+B 执行通道', () => {
+  it('按路由、Adapter、工具和 UI effect 顺序使用 Deadline phase', async() => {
+    const phases: RunDeadlinePhase[] = []
+    const registry = new PageAdapterRegistry()
+    const adapter = createAdapter()
+    const routerPort = createRouterPort({
+      push: vi.fn(async() => { registry.register(adapter) })
+    })
+    const tool = defineReadTool({
+      moduleId: 'gateway',
+      name: 'query-phases',
+      version: 1,
+      title: '查询',
+      description: '查询',
+      aliases: [],
+      permissions: [],
+      owner: 'test',
+      lifecycle: { status: 'active' },
+      risk: 'read',
+      executionMode: 'page',
+      schema: Type.Object({}),
+      execute: async() => ({
+        ok: true,
+        message: 'ok',
+        uiEffect: showQueryEffect
+      })
+    })
+
+    await createActionRouter(registry, routerPort).execute({
+      tool,
+      context,
+      input: {},
+      requestId,
+      deadline: recordingDeadline(phases)
+    })
+
+    expect(phases).toEqual([
+      'route_navigation',
+      'page_adapter_wait',
+      'read_execution',
+      'ui_effect'
+    ])
+  })
+
+  it('write_execution 超时时返回写入结果未知', async() => {
+    const controller = new AbortController()
+    const deadline: DeadlineScope = {
+      remainingMs: () => 1000,
+      run: async<T>(phase: RunDeadlinePhase, operation: () => T | Promise<T>) => {
+        if (phase !== 'write_execution') return operation()
+        controller.abort(new Error('deadline'))
+        throw new Error('deadline')
+      }
+    }
+    const execute = vi.fn().mockResolvedValue({
+      ok: false,
+      message: 'should not execute'
+    })
+    const tool = defineWriteTool({
+      moduleId: 'gateway',
+      name: 'update-timeout',
+      version: 1,
+      title: '更新',
+      description: '更新',
+      aliases: [],
+      permissions: [],
+      owner: 'test',
+      lifecycle: { status: 'active' },
+      risk: 'write',
+      executionMode: 'global',
+      schema: Type.Object({}),
+      prepare: vi.fn(),
+      execute
+    })
+    const prepared: PreparedAction = {
+      title: '更新',
+      rows: [],
+      payload: { id: 1 }
+    }
+
+    await expect(createActionRouter(new PageAdapterRegistry()).execute({
+      tool,
+      context: { ...context, signal: controller.signal },
+      input: {},
+      prepared,
+      requestId,
+      deadline
+    })).resolves.toEqual({
+      ok: false,
+      message: defaultMessages.writeStateUnknown,
+      writeState: 'unknown'
+    })
+    expect(execute).not.toHaveBeenCalled()
+  })
+
+  it('committed 写入的 ui_effect 超时不降级为 unknown', async() => {
+    const controller = new AbortController()
+    const applyUiEffect = vi.fn()
+    const registry = new PageAdapterRegistry()
+    registry.register(createAdapter(applyUiEffect))
+    const committed: ToolResult = {
+      ok: true,
+      message: 'saved',
+      writeState: 'committed',
+      uiEffect: showQueryEffect
+    }
+    const deadline: DeadlineScope = {
+      remainingMs: () => 1000,
+      run: async<T>(phase: RunDeadlinePhase, operation: () => T | Promise<T>) => {
+        if (phase !== 'ui_effect') return operation()
+        controller.abort(new Error('deadline'))
+        throw new Error('deadline')
+      }
+    }
+    const tool = defineWriteTool({
+      moduleId: 'gateway',
+      name: 'update-committed',
+      version: 1,
+      title: '更新',
+      description: '更新',
+      aliases: [],
+      permissions: [],
+      owner: 'test',
+      lifecycle: { status: 'active' },
+      risk: 'write',
+      executionMode: 'global',
+      schema: Type.Object({}),
+      prepare: vi.fn(),
+      execute: vi.fn().mockResolvedValue(committed)
+    })
+
+    await expect(createActionRouter(registry).execute({
+      tool,
+      context: { ...context, signal: controller.signal },
+      input: {},
+      prepared: { title: '更新', rows: [], payload: { id: 1 } },
+      requestId,
+      deadline
+    })).resolves.toEqual(committed)
+    expect(controller.signal.aborted).toBe(true)
+    expect(applyUiEffect).not.toHaveBeenCalled()
+  })
+
   it('已 abort 的 page 工具不导航、不执行、不应用页面效果', async() => {
     const controller = new AbortController()
     controller.abort()

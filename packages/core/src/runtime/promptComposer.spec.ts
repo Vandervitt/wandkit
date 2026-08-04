@@ -23,6 +23,30 @@ const gatewayModule: ModuleDefinition<{ companyName: string, secret: string }> =
 }
 
 describe('Prompt Composer', () => {
+  it('将 Runtime AbortSignal 透传给模块上下文格式化', async() => {
+    const controller = new AbortController()
+    let receivedSignal: AbortSignal | undefined
+    const module: ModuleDefinition<{ companyName: string }> = {
+      ...gatewayModule,
+      formatContext: (context, signal) => {
+        receivedSignal = signal
+        return `Current company: ${context.companyName}`
+      }
+    }
+
+    await composePromptMessages({
+      activeModules: [module],
+      pageContext: {
+        moduleId: 'gateway',
+        value: { companyName: 'Acme' }
+      },
+      history: [],
+      signal: controller.signal
+    })
+
+    expect(receivedSignal).toBe(controller.signal)
+  })
+
   it('按全局 Prompt、模块 Prompt、页面白名单上下文、历史的顺序组合', async() => {
     const history = [
       { role: 'user' as const, content: 'query gateways for the current company' },

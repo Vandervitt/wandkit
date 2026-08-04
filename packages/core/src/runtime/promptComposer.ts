@@ -98,6 +98,8 @@ export interface ComposePromptOptions extends PromptComposerConfig {
   history: readonly LlmMessage[]
   /** 可注入的时钟，缺省为真实时间。测试里会钉在一个固定时刻上。 */
   now?: Dayjs
+  /** 当前 Run 的合作式中止信号。 */
+  signal?: AbortSignal
 }
 
 /**
@@ -129,7 +131,10 @@ export async function composePromptMessages(
       candidate => candidate.id === options.pageContext?.moduleId
     )
     if (module) {
-      const context = await module.formatContext(options.pageContext.value)
+      const context = await module.formatContext(
+        options.pageContext.value,
+        options.signal
+      )
       if (context) {
         // 页面上下文是业务数据（客户名、任务标题、自由文本备注），因此可能含有攻击者
         // 通过普通产品表单种进去的指令样文本。这里以 *user* 角色注入并显式标注为不可信，

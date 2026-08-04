@@ -1,3 +1,4 @@
+import type { DeadlineScope } from '../contracts/deadline'
 import type { PageAdapter } from '../contracts/pageAdapter'
 import type { PageAdapterRegistry } from './pageAdapterRegistry'
 
@@ -15,7 +16,12 @@ export interface RouterLocation {
  */
 export interface RouterPort {
   getCurrentRouteName(): string | undefined
-  push(location: RouterLocation): Promise<unknown>
+  push(location: RouterLocation, signal?: AbortSignal): Promise<unknown>
+}
+
+export interface NavigateAndWaitOptions {
+  signal?: AbortSignal
+  deadline?: DeadlineScope
 }
 
 /** 承载请求 ID 的路由 query 参数名的默认值；宿主页面据此读取当前同步请求。 */
@@ -54,18 +60,45 @@ export class NavigationCoordinator {
   async navigateAndWait(
     moduleId: string,
     routeName: string,
-    requestId: string
+    requestId: string,
+    options: NavigateAndWaitOptions = {}
   ): Promise<PageAdapter> {
     try {
-      await this.router.push({
-        name: routeName,
-        query: { [this.requestIdQueryKey]: requestId }
+      await this.runWithDeadline(options, 'route_navigation', () => {
+        const location = {
+          name: routeName,
+          query: { [this.requestIdQueryKey]: requestId }
+        }
+        return options.signal
+          ? this.router.push(location, options.signal)
+          : this.router.push(location)
       })
     } catch (error) {
       if (!this.isSameRouteNavigationDuplicated(error, routeName)) throw error
     }
 
-    return this.adapters.waitFor(moduleId, routeName, requestId, this.timeoutMs)
+    return this.runWithDeadline(options, 'page_adapter_wait', () => (
+      this.adapters.waitFor(
+        moduleId,
+        routeName,
+        requestId,
+        this.timeoutMs,
+        options.signal
+      )
+    ))
+  }
+
+  private runWithDeadline<T>(
+    options: NavigateAndWaitOptions,
+    phase: 'route_navigation' | 'page_adapter_wait',
+    operation: () => T | Promise<T>
+  ): Promise<T> {
+    if (options.deadline) return options.deadline.run(phase, operation)
+    try {
+      return Promise.resolve(operation())
+    } catch (error) {
+      return Promise.reject(error)
+    }
   }
 
   /**

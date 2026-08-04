@@ -21,8 +21,9 @@ export class PageWaitTimeoutError extends Error {
 /** A pending {@link PageAdapterRegistry.waitFor} promise. */
 interface AdapterWaiter {
   resolve(adapter: PageAdapter): void
-  reject(error: Error): void
+  reject(error: unknown): void
   timeout: ReturnType<typeof setTimeout>
+  removeAbortListener?: () => void
 }
 
 /**
@@ -215,23 +216,37 @@ export class PageAdapterRegistry {
     moduleId: string,
     routeName: string,
     requestId: string,
-    timeoutMs: number
+    timeoutMs: number,
+    signal?: AbortSignal
   ): Promise<PageAdapter> {
     const key = this.key(moduleId, routeName)
+    if (signal?.aborted) return Promise.reject(this.abortReason(signal))
     const mounted = this.adapters.get(key)
     if (mounted) return Promise.resolve(mounted)
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        const waiters = this.waiters.get(key)
-        waiters?.delete(waiter)
-        if (waiters?.size === 0) this.waiters.delete(key)
+        this.cleanupWaiter(key, waiter)
         reject(new PageWaitTimeoutError(moduleId, routeName, requestId))
       }, timeoutMs)
       const waiter: AdapterWaiter = { resolve, reject, timeout }
+      if (signal) {
+        const onAbort = () => {
+          this.cleanupWaiter(key, waiter)
+          reject(this.abortReason(signal))
+        }
+        signal.addEventListener('abort', onAbort, { once: true })
+        waiter.removeAbortListener = () => {
+          signal.removeEventListener('abort', onAbort)
+        }
+      }
       const waiters = this.waiters.get(key) ?? new Set<AdapterWaiter>()
       waiters.add(waiter)
       this.waiters.set(key, waiters)
+      if (signal?.aborted) {
+        this.cleanupWaiter(key, waiter)
+        reject(this.abortReason(signal))
+      }
     })
   }
 
@@ -239,10 +254,24 @@ export class PageAdapterRegistry {
     const waiters = this.waiters.get(key)
     if (!waiters) return
 
-    this.waiters.delete(key)
     waiters.forEach((waiter) => {
-      clearTimeout(waiter.timeout)
+      this.cleanupWaiter(key, waiter)
       waiter.resolve(adapter)
+    })
+  }
+
+  private cleanupWaiter(key: string, waiter: AdapterWaiter): void {
+    clearTimeout(waiter.timeout)
+    waiter.removeAbortListener?.()
+    const waiters = this.waiters.get(key)
+    waiters?.delete(waiter)
+    if (waiters?.size === 0) this.waiters.delete(key)
+  }
+
+  private abortReason(signal: AbortSignal): unknown {
+    if (signal.reason !== undefined) return signal.reason
+    return Object.assign(new Error('The operation was aborted'), {
+      name: 'AbortError'
     })
   }
 

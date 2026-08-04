@@ -43,5 +43,8 @@ export interface ModuleDefinition<TContext = unknown> {
    * 攻击者可以通过普通产品表单在里面种下指令样文本。绝不要返回任何你希望模型当作
    * 指令执行的内容。
    */
-  formatContext(context: TContext): string | Promise<string>
+  formatContext(
+    context: TContext,
+    signal?: AbortSignal
+  ): string | Promise<string>
 }

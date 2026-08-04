@@ -13,7 +13,12 @@ import {
   type PreparedAction,
   type ToolResult
 } from '../contracts/result'
-import type { RunSnapshot, RunStatus } from '../contracts/run'
+import type {
+  RunSnapshot,
+  RunStatus,
+  TaskFailure,
+  TaskOutcome
+} from '../contracts/run'
 import type { ToolDefinition, ToolExecutionContext } from '../contracts/tool'
 import type { ResolveCandidatesOptions } from '../discovery/candidateResolver'
 import {
@@ -41,6 +46,11 @@ import {
   parseToolArguments
 } from './resultNormalizer'
 import { transition, type RunEvent } from './runStateMachine'
+import {
+  RunDeadline,
+  isRunDeadlineExceededError,
+  type DeadlineExceededDetails
+} from './runDeadline'
 import { TraceCollector } from './traceCollector'
 
 /**
@@ -100,7 +110,7 @@ export interface AgentRuntimeDependencies {
    * `adapters.get(moduleId, routeName)?.getContext() ?? null`，不该被迫包一层
    * `Promise.resolve`。Runtime 一律 `await` 后再判 `null`。
    */
-  getPageContext(moduleId: string): unknown | Promise<unknown>
+  getPageContext(moduleId: string, signal?: AbortSignal): unknown | Promise<unknown>
   emit(event: RuntimeUiEvent): void
 }
 
@@ -119,10 +129,11 @@ export interface AgentRuntimeOptions {
   /** 单个 Run 最多执行多少次工具调用，**缺省不限制**。理由同 {@link maxRounds}。 */
   maxToolCalls?: number
   /**
-   * 单个 Run 的总时长上限，缺省 10 分钟。
+   * 单个 Run 的主动处理总预算，缺省 10 分钟；人工确认等待期间暂停计时。
    *
-   * 这是没有次数上限之后**唯一的自动兜底**，因此不能设得太紧：多步页面操作每一步都
-   * 是一次模型往返，原来的 60 秒连一次表单填写都跑不完。
+   * 同一份 Deadline 覆盖页面上下文、Prompt、模型、prepare、工具、导航、Adapter 等待
+   * 与 UI effect。这是没有次数上限之后**唯一的自动兜底**，因此不能设得太紧：多步页面
+   * 操作每一步都是一次模型往返，原来的 60 秒连一次表单填写都跑不完。
    */
   runTimeoutMs?: number
   now?: () => number
@@ -147,7 +158,6 @@ interface ActiveRun {
   traceId: string
   userInput: string
   status: RunStatus
-  startedAt: number
   rounds: number
   toolCalls: number
   modelCorrectionAttempts: number
@@ -157,8 +167,9 @@ interface ActiveRun {
   permissions: string[]
   pageContext?: unknown
   abortController: AbortController
+  deadline: RunDeadline
   stopped: boolean
-  timedOut: boolean
+  outcome?: TaskOutcome
   pendingToolCallIds: string[]
   lastToolCallId?: string
   /**
@@ -168,10 +179,14 @@ interface ActiveRun {
    * 会把单价、并发量这类只有用户知道的值凭空编出来再试一次，提示词拦不住。
    */
   needsUserInput: boolean
-  // 执行超时只应度量「主动处理耗时」，人工确认等待时长通过 pausedMs 从预算中扣除，
-  // 避免用户确认慢导致写入执行后 Run 又被误判为超时失败（诱导重复提交）。
-  pausedMs: number
-  awaitingSince?: number
+  /** 本 Run 是否曾收到需要用户补充信息的明确工具结果。 */
+  requiresUserInput: boolean
+  /** 是否已进入过真正的写执行。 */
+  writeExecutionStarted: boolean
+  lastWriteState?: 'committed' | 'unknown'
+  terminationCause?:
+    | { kind: 'user_stopped' }
+    | { kind: 'deadline', details: DeadlineExceededDetails }
 }
 
 interface PreparedCallOutcome {
@@ -191,11 +206,21 @@ interface RefreshedPreparedCall {
  * 一旦成为分支依据，翻译一句话就能静默改变执行语义。
  */
 interface RunFailure {
-  kind: 'timeout' | 'max_rounds' | 'tool_failure' | 'run_failed'
+  code: TaskFailure['code']
   message: string
 }
 
 const terminalStatuses: RunStatus[] = ['completed', 'failed', 'cancelled']
+
+function terminalStatus(
+  outcome: TaskOutcome
+): Extract<RunStatus, 'completed' | 'failed' | 'cancelled'> {
+  if (outcome.kind === 'completed' || outcome.kind === 'needs_input') {
+    return 'completed'
+  }
+  if (outcome.kind === 'cancelled') return 'cancelled'
+  return 'failed'
+}
 
 /** 兜底失败原因里附带的原始错误上限。够定位问题，又不至于把一整页 HTML 灌进气泡。 */
 const FAILURE_DETAIL_MAX_LENGTH = 300
@@ -223,8 +248,8 @@ function describeUnexpectedFailure(fallback: string, error: unknown): string {
  *
  * - **写操作在本轮只做 prepare。** 模型提出的写调用一律先挂起等确认；真正的执行在
  *   用户批准后由 {@link confirm} 触发，且会重跑 prepare 做比对。
- * - **等待确认的时间不计入超时。** 见 `pausedMs`。人确认得慢导致 Run 超时失败，会直接
- *   诱发重复提交，是这类系统最典型的事故链。
+ * - **等待确认的时间不计入超时。** 由共享 Deadline 暂停预算。人确认得慢导致 Run
+ *   超时失败，会直接诱发重复提交，是这类系统最典型的事故链。
  * - **失败会中止整轮。** 一个工具失败后，同轮剩余调用全部补上「未执行」的结果再终止——
  *   工具调用协议要求每个 `tool_call_id` 都有对应的 tool 消息，缺一条整条历史就废了。
  * - **模型选错工具不算失败。** 回一条带可用工具清单的软失败，让它下一轮自己改正；
@@ -278,7 +303,7 @@ export class AgentRuntime {
   }
 
   snapshot(): RunSnapshot {
-    return { ...this.lastSnapshot }
+    return deepClone(this.lastSnapshot)
   }
 
   currentConfirmation(): ConfirmationRequest | undefined {
@@ -300,12 +325,28 @@ export class AgentRuntime {
     }
 
     const id = ++this.sequence
-    const run: ActiveRun = {
+    const startedAt = this.now()
+    const abortController = new AbortController()
+    let run: ActiveRun
+    const deadline = new RunDeadline({
+      budgetMs: this.runTimeoutMs,
+      startedAt,
+      now: this.now,
+      controller: abortController,
+      onTimeout: details => {
+        if (run.terminationCause) return false
+        run.terminationCause = { kind: 'deadline', details }
+        return true
+      },
+      onPhaseStart: phase => {
+        if (phase === 'write_execution') run.writeExecutionStarted = true
+      }
+    })
+    run = {
       runId: 'run-' + id,
       traceId: 'trace-' + id,
       userInput,
       status: 'idle',
-      startedAt: this.now(),
       rounds: 0,
       toolCalls: 0,
       modelCorrectionAttempts: 0,
@@ -313,12 +354,13 @@ export class AgentRuntime {
       activatedModuleIds: [],
       previousModuleIds: [...this.previousModuleIds],
       permissions: this.dependencies.getPermissions(),
-      abortController: new AbortController(),
+      abortController,
+      deadline,
       stopped: false,
-      timedOut: false,
       pendingToolCallIds: [],
       needsUserInput: false,
-      pausedMs: 0
+      requiresUserInput: false,
+      writeExecutionStarted: false
     }
     this.active = run
     this.confirmations.clear()
@@ -341,7 +383,7 @@ export class AgentRuntime {
     const run = this.requireAwaitingRun()
     // 先校验、后停表：ID 不是队首时 `approve` 会抛，此时 Run 仍在等待确认。
     // 顺序反过来会把等待计时永久关掉（`beginAwaiting` 只在弹出下一张卡片时才重新
-    // 武装），于是一次误点就让后续的人工等待重新计入超时预算——正是 `pausedMs`
+    // 武装），于是一次误点就让后续的人工等待重新计入超时预算——正是 Deadline pause
     // 要防的那条「确认慢 → Run 超时 → 诱导重复提交」的事故链。
     const pending = this.confirmations.approve(confirmationId)
     this.endAwaiting(run)
@@ -362,7 +404,18 @@ export class AgentRuntime {
       return this.failAfterToolFailure(run, result.message)
     }
 
-    const refreshed = await this.refreshPreparedCall(run, tool, pending)
+    let refreshed: RefreshedPreparedCall
+    try {
+      refreshed = await this.refreshPreparedCall(run, tool, pending)
+    } catch (error) {
+      if (run.terminationCause?.kind === 'deadline') {
+        return this.finishTimedOut(run)
+      }
+      if (run.terminationCause?.kind === 'user_stopped' || this.isInactive(run)) {
+        return this.toSnapshot(run)
+      }
+      throw error
+    }
     if (this.isInactive(run)) return this.toSnapshot(run)
     if (refreshed.result) {
       this.recordToolResult(
@@ -388,7 +441,8 @@ export class AgentRuntime {
         context: this.createToolContext(run),
         input: undefined,
         prepared: refreshed.prepared,
-        requestId: pending.confirmationId
+        requestId: pending.confirmationId,
+        deadline: run.deadline
       })
     } catch (error) {
       result = executionFailureResult(error, this.messages)
@@ -401,6 +455,9 @@ export class AgentRuntime {
       startedAt,
       { allowStoppedUi: true, cancelled: isCancelledResult(result) }
     )
+    if (run.terminationCause?.kind === 'deadline') {
+      return this.finishTimedOut(run, result.writeState)
+    }
     if (run.stopped || this.active !== run) return this.toSnapshot(run)
     this.transitionRun(run, { type: 'WRITE_COMPLETED' }, false)
     if (!result.ok && !isCancelledResult(result)) {
@@ -462,11 +519,15 @@ export class AgentRuntime {
   stop(): void {
     const run = this.active
     if (!run || terminalStatuses.includes(run.status)) return
+    if (run.terminationCause) return
+    run.terminationCause = { kind: 'user_stopped' }
     run.stopped = true
-    run.abortController.abort()
+    run.abortController.abort(Object.assign(new Error(this.messages.stoppedByUser), {
+      name: 'AbortError'
+    }))
     this.confirmations.clear()
     this.historyStore.rollbackToSafePoint()
-    this.finish(run, 'cancelled', this.messages.stoppedByUser)
+    this.finish(run, { kind: 'cancelled', reason: 'user_stopped' })
   }
 
   /**
@@ -522,11 +583,15 @@ export class AgentRuntime {
         const pageContext = await this.resolvePageContext(run, modules)
         if (this.isInactive(run)) return this.toSnapshot(run)
         run.pageContext = pageContext?.value
-        const messages = await this.dependencies.composePrompt({
-          activeModules: modules,
-          pageContext,
-          history: this.historyStore.messages
-        })
+        const messages = await run.deadline.run(
+          'prompt_composition',
+          () => this.dependencies.composePrompt({
+            activeModules: modules,
+            pageContext,
+            history: this.historyStore.messages,
+            signal: run.abortController.signal
+          })
+        )
         if (this.isInactive(run)) return this.toSnapshot(run)
 
         this.traces.record(run.runId, {
@@ -541,11 +606,13 @@ export class AgentRuntime {
         // 参数量模型）。判定口径很窄，且只认本轮真实暴露过的工具名，因此救援不会
         // 成为绕过权限过滤的旁路，详见 normalizeLlmAssistantMessage。
         const assistant = normalizeLlmAssistantMessage(
-          await this.chatWithDeadline(
-            run,
-            applyMessageBudget(messages),
-            exposedTools
-          ),
+          await run.deadline.run('model_call', () => (
+            this.dependencies.llm.chat(
+              applyMessageBudget(messages),
+              exposedTools,
+              run.abortController.signal
+            )
+          )),
           exposedTools
         )
         if (this.isInactive(run)) return this.toSnapshot(run)
@@ -567,7 +634,11 @@ export class AgentRuntime {
         }
 
         run.pendingToolCallIds = calls.map(call => call.id)
-        if (calls.length === 0) return this.finish(run, 'completed')
+        if (calls.length === 0) {
+          return this.finish(run, run.requiresUserInput
+            ? { kind: 'needs_input' }
+            : { kind: 'completed' })
+        }
 
         const preparedCalls: PendingPreparedCall[] = []
         let retryModel = false
@@ -590,7 +661,11 @@ export class AgentRuntime {
               { limit: this.maxToolCalls }
             )
             this.recordToolResult(run, call.id, call.function.name, { ok: false, message: reason })
-            return this.failAfterToolFailure(run, reason)
+            return this.failAfterToolFailure(
+              run,
+              reason,
+              'MAX_TOOL_CALLS_REACHED'
+            )
           }
           run.toolCalls += 1
 
@@ -674,6 +749,9 @@ export class AgentRuntime {
               call.function.name,
               parsed.value
             )
+            if (run.terminationCause?.kind === 'deadline') {
+              return this.finishTimedOut(run, result?.writeState)
+            }
             if (this.isInactive(run)) return this.toSnapshot(run)
             if (
               result && !result.ok &&
@@ -695,25 +773,26 @@ export class AgentRuntime {
       }
       return this.toSnapshot(run)
     } catch (error) {
-      if (run.stopped || this.active !== run) {
+      if (
+        run.terminationCause?.kind === 'user_stopped' ||
+        run.stopped ||
+        this.active !== run
+      ) {
         if (!terminalStatuses.includes(run.status)) {
           this.historyStore.rollbackToSafePoint()
-          return this.finish(run, 'cancelled', this.messages.stoppedByUser)
+          return this.finish(run, { kind: 'cancelled', reason: 'user_stopped' })
         }
         return this.toSnapshot(run)
       }
-      if (run.timedOut) {
-        return this.fail(run, {
-          kind: 'timeout',
-          message: formatMessage(this.messages.runTimeout, { ms: this.runTimeoutMs })
-        })
+      if (run.terminationCause?.kind === 'deadline') {
+        return this.finishTimedOut(run)
       }
       if (error instanceof Error && error.name === 'AbortError') {
         this.historyStore.rollbackToSafePoint()
-        return this.finish(run, 'cancelled', this.messages.stoppedByUser)
+        return this.finish(run, { kind: 'cancelled', reason: 'user_stopped' })
       }
       return this.fail(run, {
-        kind: 'run_failed',
+        code: 'RUNTIME_FAILED',
         message: describeUnexpectedFailure(this.messages.runFailed, error)
       })
     }
@@ -765,7 +844,12 @@ export class AgentRuntime {
     value: unknown
   } | undefined> {
     for (const module of modules) {
-      const value = await this.dependencies.getPageContext(module.id)
+      const value = await run.deadline.run('page_context', () => (
+        this.dependencies.getPageContext(
+          module.id,
+          run.abortController.signal
+        )
+      ))
       // 每个 await 之间 Run 都可能已被停止，别再去问后续模块要快照。
       if (this.isInactive(run)) return undefined
       if (value !== null) return { moduleId: module.id, value }
@@ -791,7 +875,9 @@ export class AgentRuntime {
     if (this.isInactive(run)) return {}
     this.transitionRun(run, { type: 'PREPARE_WRITE' })
     try {
-      const prepared = await tool.prepare(this.createToolContext(run), input)
+      const prepared = await run.deadline.run('write_preparation', () => (
+        tool.prepare(this.createToolContext(run), input)
+      ))
       if (this.isInactive(run)) return {}
       this.traces.record(run.runId, {
         type: 'prepared',
@@ -811,6 +897,7 @@ export class AgentRuntime {
         }
       }
     } catch (error) {
+      if (isRunDeadlineExceededError(error)) throw error
       if (error instanceof ToolPreparationNotice) {
         this.recordToolResult(run, toolCallId, functionName, error.result)
         this.transitionRun(run, { type: 'PREPARE_COMPLETED' }, false)
@@ -847,10 +934,16 @@ export class AgentRuntime {
         tool,
         context: this.createToolContext(run),
         input,
-        requestId: `${run.runId}:${toolCallId}`
+        requestId: `${run.runId}:${toolCallId}`,
+        deadline: run.deadline
       })
     } catch (error) {
-      result = executionFailureResult(error, this.messages)
+      result = run.terminationCause?.kind === 'deadline'
+        ? this.runTimeoutResult()
+        : executionFailureResult(error, this.messages)
+    }
+    if (run.terminationCause?.kind === 'deadline') {
+      result = this.runTimeoutResult()
     }
     this.recordToolResult(run, toolCallId, functionName, result, startedAt)
     if (!this.isInactive(run)) {
@@ -883,10 +976,12 @@ export class AgentRuntime {
       }
     }
     try {
-      const prepared = await tool.prepare(
-        this.createToolContext(run),
-        deepClone(pending.input)
-      )
+      const prepared = await run.deadline.run('write_revalidation', () => (
+        tool.prepare(
+          this.createToolContext(run),
+          deepClone(pending.input)
+        )
+      ))
       if (!this.sameConfirmationContent(pending.prepared, prepared)) {
         return {
           result: {
@@ -897,6 +992,7 @@ export class AgentRuntime {
       }
       return { prepared }
     } catch (error) {
+      if (isRunDeadlineExceededError(error)) throw error
       if (error instanceof ToolPreparationNotice) return { result: error.result }
       return {
         result: error instanceof ToolPreparationError
@@ -1011,6 +1107,8 @@ export class AgentRuntime {
       effectType: result.uiEffect?.type
     })
     if (result.needsUserInput) run.needsUserInput = true
+    if (result.needsUserInput) run.requiresUserInput = true
+    if (result.writeState) run.lastWriteState = result.writeState
     if (!options.silentUi) {
       this.dependencies.emit({
         type: 'tool_result',
@@ -1042,51 +1140,70 @@ export class AgentRuntime {
     return run.stopped || run.abortController.signal.aborted || this.active !== run
   }
 
-  /**
-   * 带剩余时间预算地调一次模型。
-   *
-   * 预算取自 {@link activeElapsed}，即已扣除人工确认等待之后的时间。
-   */
-  private async chatWithDeadline(
-    run: ActiveRun,
-    messages: LlmMessage[],
-    tools: unknown[]
-  ) {
-    const remaining = this.runTimeoutMs - this.activeElapsed(run)
-    if (remaining <= 0) throw new Error(formatMessage(this.messages.runTimeout, { ms: this.runTimeoutMs }))
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeout = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        run.timedOut = true
-        run.abortController.abort()
-        reject(new Error(formatMessage(this.messages.runTimeout, { ms: this.runTimeoutMs })))
-      }, remaining)
-    })
-    try {
-      return await Promise.race([
-        this.dependencies.llm.chat(messages, tools, run.abortController.signal),
-        timeout
-      ])
-    } finally {
-      if (timer) clearTimeout(timer)
-    }
-  }
-
   private limitReason(run: ActiveRun): RunFailure | undefined {
-    const elapsed = this.activeElapsed(run)
-    if (elapsed > this.runTimeoutMs) {
-      return {
-        kind: 'timeout',
-        message: formatMessage(this.messages.runTimeout, { ms: this.runTimeoutMs })
-      }
-    }
     if (run.rounds >= this.maxRounds) {
       return {
-        kind: 'max_rounds',
+        code: 'MAX_ROUNDS_REACHED',
         message: formatMessage(this.messages.maxRoundsReached, { limit: this.maxRounds })
       }
     }
     return undefined
+  }
+
+  private finishTimedOut(
+    run: ActiveRun,
+    writeState?: 'committed' | 'unknown'
+  ): RunSnapshot {
+    if (run.terminationCause?.kind !== 'deadline') return this.toSnapshot(run)
+    const details = run.terminationCause.details
+    const resolvedWriteState = writeState ?? run.lastWriteState
+    const message = formatMessage(this.messages.runTimeout, {
+      ms: this.runTimeoutMs
+    })
+    this.settlePendingCallsAfterTimeout(run, message)
+    const outcome: TaskOutcome = {
+      kind: 'timed_out',
+      error: {
+        code: 'RUN_DEADLINE_EXCEEDED',
+        message,
+        retryable: !run.writeExecutionStarted,
+        phase: details.phase,
+        budgetMs: details.budgetMs,
+        activeElapsedMs: details.activeElapsedMs,
+        ...(resolvedWriteState ? { writeState: resolvedWriteState } : {})
+      }
+    }
+    this.traces.record(run.runId, {
+      type: 'deadline_exceeded',
+      phase: details.phase,
+      budgetMs: details.budgetMs,
+      activeElapsedMs: details.activeElapsedMs,
+      retryable: !run.writeExecutionStarted,
+      ...(resolvedWriteState ? { writeState: resolvedWriteState } : {})
+    })
+    return this.finish(run, outcome)
+  }
+
+  private settlePendingCallsAfterTimeout(
+    run: ActiveRun,
+    message: string
+  ): void {
+    const pendingToolCallIds = run.pendingToolCallIds.splice(0)
+    pendingToolCallIds.forEach(toolCallId => {
+      this.historyStore.appendToolResult(toolCallId, {
+        ok: false,
+        message
+      })
+    })
+  }
+
+  private runTimeoutResult(): ToolResult {
+    return {
+      ok: false,
+      message: formatMessage(this.messages.runTimeout, {
+        ms: this.runTimeoutMs
+      })
+    }
   }
 
   /**
@@ -1102,7 +1219,7 @@ export class AgentRuntime {
     // （OpenAI tool 协议非法，会污染下一个 Run 的历史）。
     if (
       run.lastToolCallId &&
-      failure.kind === 'max_rounds' &&
+      failure.code === 'MAX_ROUNDS_REACHED' &&
       run.pendingToolCallIds.includes(run.lastToolCallId)
     ) {
       this.historyStore.appendToolResult(
@@ -1110,7 +1227,13 @@ export class AgentRuntime {
         { ok: false, message: failure.message }
       )
     }
-    return this.finish(run, 'failed', failure.message)
+    const error: TaskFailure = {
+      code: failure.code,
+      message: failure.message,
+      retryable: failure.code === 'RUNTIME_FAILED' && !run.writeExecutionStarted,
+      ...(run.lastWriteState ? { writeState: run.lastWriteState } : {})
+    }
+    return this.finish(run, { kind: 'failed', error })
   }
 
   /**
@@ -1119,35 +1242,50 @@ export class AgentRuntime {
    * 补齐不是礼貌，是硬要求：留下没有 tool 消息应答的 `tool_call_id`，会让下一个 Run
    * 带着一段非法历史去请求，厂商直接拒绝。
    */
-  private failAfterToolFailure(run: ActiveRun, reason: string): RunSnapshot {
+  private failAfterToolFailure(
+    run: ActiveRun,
+    reason: string,
+    code: TaskFailure['code'] = 'TOOL_FAILED'
+  ): RunSnapshot {
     const skippedToolCallIds = run.pendingToolCallIds.splice(0)
     skippedToolCallIds.forEach(toolCallId => {
       this.historyStore.appendToolResult(toolCallId, this.skippedAfterFailureResult)
     })
-    return this.fail(run, { kind: 'tool_failure', message: reason })
+    return this.fail(run, { code, message: reason })
   }
 
   private finish(
     run: ActiveRun,
-    status: Extract<RunStatus, 'completed' | 'failed' | 'cancelled'>,
-    reason?: string
+    outcome: TaskOutcome
   ): RunSnapshot {
     if (this.active !== run) return this.toSnapshot(run)
-    if (!terminalStatuses.includes(run.status)) this.traces.finish(run.runId, status, reason)
     if (!terminalStatuses.includes(run.status)) {
+      run.outcome = deepClone(outcome)
+      const status = terminalStatus(outcome)
+      const reason = this.outcomeReason(outcome)
+      this.traces.finish(run.runId, status, reason, run.outcome)
       const event: RunEvent = status === 'completed'
         ? { type: 'COMPLETE' }
         : status === 'failed'
           ? { type: 'FAIL' }
           : { type: 'CANCEL' }
       this.transitionRun(run, event, false)
-    }
-    if (status === 'completed') {
-      this.previousModuleIds = [...run.previousModuleIds]
+      if (status === 'completed') {
+        this.previousModuleIds = [...run.previousModuleIds]
+      }
     }
     this.confirmations.clear()
-    this.publishState(run, reason)
+    this.publishState(run, this.outcomeReason(run.outcome ?? outcome))
     return this.toSnapshot(run)
+  }
+
+  private outcomeReason(outcome: TaskOutcome): string | undefined {
+    if (outcome.kind === 'failed' || outcome.kind === 'timed_out') {
+      return outcome.error.message
+    }
+    return outcome.kind === 'cancelled'
+      ? this.messages.stoppedByUser
+      : undefined
   }
 
   private requireAwaitingRun(): ActiveRun {
@@ -1162,31 +1300,16 @@ export class AgentRuntime {
     if (this.active !== run) return
     this.beginAwaiting(run)
     this.publishState(run)
-    this.dependencies.emit({ type: 'confirmation', confirmation })
+    this.dependencies.emit(deepClone({ type: 'confirmation', confirmation }))
   }
 
-  /** 开始计量人工确认的等待时长，见 {@link activeElapsed}。 */
+  /** 暂停人工确认期间的主动处理预算。 */
   private beginAwaiting(run: ActiveRun): void {
-    run.awaitingSince = this.now()
+    run.deadline.pause()
   }
 
   private endAwaiting(run: ActiveRun): void {
-    if (run.awaitingSince === undefined) return
-    run.pausedMs += Math.max(0, this.now() - run.awaitingSince)
-    run.awaitingSince = undefined
-  }
-
-  /**
-   * Run 的「主动处理耗时」，即总耗时减去等待人工确认的时间。
-   *
-   * 超时必须按这个口径算。否则用户盯着确认卡片犹豫一分钟，Run 就超时失败了——而他刚
-   * 批准的那个写入可能已经发出去了，接下来他多半会重来一次。
-   */
-  private activeElapsed(run: ActiveRun): number {
-    const paused = run.awaitingSince === undefined
-      ? 0
-      : Math.max(0, this.now() - run.awaitingSince)
-    return this.now() - run.startedAt - run.pausedMs - paused
+    run.deadline.resume()
   }
 
   /**
@@ -1206,17 +1329,22 @@ export class AgentRuntime {
   private publishState(run: ActiveRun, stopReason?: string): void {
     if (this.active !== run) return
     const snapshot = this.toSnapshot(run)
-    this.dependencies.emit({
+    this.dependencies.emit(deepClone({
       type: 'state',
       snapshot,
       activeModuleIds: [...run.previousModuleIds],
       ...(stopReason ? { stopReason } : {})
-    })
+    }))
   }
 
   private toSnapshot(run: ActiveRun): RunSnapshot {
-    const snapshot = { runId: run.runId, traceId: run.traceId, status: run.status }
-    if (this.active === run) this.lastSnapshot = snapshot
-    return { ...snapshot }
+    const snapshot: RunSnapshot = {
+      runId: run.runId,
+      traceId: run.traceId,
+      status: run.status,
+      ...(run.outcome ? { outcome: deepClone(run.outcome) } : {})
+    }
+    if (this.active === run) this.lastSnapshot = deepClone(snapshot)
+    return deepClone(snapshot)
   }
 }

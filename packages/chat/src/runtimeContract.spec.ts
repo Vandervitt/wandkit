@@ -110,6 +110,27 @@ function connect(options: { llm?: AgentRuntimeDependencies['llm'] } = {}) {
   return { session, runtime, controls, events }
 }
 
+describe('运行时与会话的确定性终态契约', () => {
+  it('核心结构化失败无宿主补丁时仍对 Chat 可见', async() => {
+    const { session, controls, events } = connect({
+      llm: {
+        chat: async() => { throw new Error('gateway unavailable') }
+      }
+    })
+
+    await controls.send('查询线路')
+
+    const terminal = events.filter(event =>
+      event.type === 'state' && event.snapshot?.status === 'failed').at(-1)
+    expect(terminal?.snapshot?.outcome).toMatchObject({
+      kind: 'failed',
+      error: { code: 'RUNTIME_FAILED' }
+    })
+    expect(session.state.status).toBe('idle')
+    expect(session.state.error).toContain('gateway unavailable')
+  })
+})
+
 describe.skipIf(!hasRealLlm)(`运行时与会话的契约（真实模型 ${REAL_LLM_MODEL}）`, () => {
   it('模型调用失败时，用户必须在界面上看到失败，而不是一片空白', async() => {
     // 用户视角的复现：发一句话 → 转几秒 → 屏幕上什么都没多出来、输入框解锁。

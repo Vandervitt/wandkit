@@ -12,7 +12,15 @@ import type { ChatSession } from './session'
 /** 运行时推给界面的事件。与核心的 `RuntimeUiEvent` 结构兼容。 */
 export interface RuntimeUiEventLike {
   type: 'state' | 'assistant' | 'confirmation' | 'tool_result' | 'clear'
-  snapshot?: { runId: string, traceId: string, status: string }
+  snapshot?: {
+    runId: string
+    traceId: string
+    status: string
+    outcome?: {
+      kind: string
+      error?: { message: string }
+    }
+  }
   content?: string | null
   /**
    * 本轮 assistant 发起的工具调用。
@@ -201,7 +209,11 @@ function applyRunStatus(
     return
   }
   if (status === 'failed') {
-    session.fail(event.stopReason || messages.runFailed)
+    session.fail(
+      event.snapshot?.outcome?.error?.message
+        || event.stopReason
+        || messages.runFailed
+    )
     return
   }
   // 用户主动取消不算异常，不该报错；跑完了却没有回答则必须说出来。
