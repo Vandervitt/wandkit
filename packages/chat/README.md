@@ -71,6 +71,21 @@ await controls.approve(session.state.confirmation.confirmationId)
 `onEvent` 要由宿主传进来，是因为 `AgentRuntime` 的事件出口是构造时注入的 `emit`
 回调，运行时本身没有订阅接口。
 
+### 失败终态如何展示
+
+桥接层按以下顺序选择用户可见的错误：
+
+```text
+snapshot.outcome.error.message
+  → stopReason
+  → Chat bridge 本地兜底文案
+```
+
+新 Runtime 的结构化 `outcome.kind` / `outcome.error.code` 用于程序判断，`message` 只用于
+展示。旧 Runtime 若还没有 `outcome`，继续只传 `stopReason` 即可；两者都缺失时桥接层仍会
+留下可见错误，不会静默切回 `idle`。这一兼容通过最小鸭子类型完成，chat 包仍不 import
+或硬依赖 Core。
+
 ### assistant 事件要补上 tool_calls
 
 核心的 `RuntimeUiEvent` **不带** `tool_calls`。缺了它，随后的 tool 结果在导出历史里

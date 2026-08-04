@@ -48,9 +48,38 @@ writeState?: 'committed' | 'unknown'
 
 请求已发出但结果未知时，返回的不是笼统的「失败」，而是明确的「勿重复提交」。写入已提交但页面刷新失败，与页面同步失败，是两条不同的话术。
 
-### 4. 人工确认不计入超时预算
+### 4. 生命周期、任务结果与共享 Deadline 分层
 
-用户确认慢 → Run 超时失败 → 诱导重复提交，是这类系统最典型的事故链。Runtime 用 `pausedMs` 把等待确认的时长从超时预算里扣除。
+`RunStatus` 只描述 Runtime 当前执行到哪个生命周期位置；终态 Snapshot 的
+`TaskOutcome` 描述本轮如何结束。两者都不替宿主判断业务目标是否已经达成：
+
+| `TaskOutcome.kind` | 对应终态 | 含义 |
+|---|---|---|
+| `completed` | `completed` | Runtime 正常收敛；**不等于业务成功** |
+| `needs_input` | `completed` | 工具明确需要用户补充信息，模型已进入追问 |
+| `cancelled` | `cancelled` | 用户调用 `stop()` 结束 Run |
+| `timed_out` | `failed` | 共享主动处理预算耗尽 |
+| `failed` | `failed` | 工具、限额或 Runtime 异常 |
+
+稳定错误码包括 `RUN_DEADLINE_EXCEEDED`、`MAX_ROUNDS_REACHED`、
+`MAX_TOOL_CALLS_REACHED`、`TOOL_FAILED` 和 `RUNTIME_FAILED`。程序控制流应读取
+`outcome.kind` 与 `outcome.error.code`，不要解析展示文案。
+
+`runTimeoutMs` 是整次 Run 的共享主动处理预算，不会在单个操作或轮次之间重置。它覆盖
+`page_context`、`prompt_composition`、`model_call`、`write_preparation`、
+`write_revalidation`、`route_navigation`、`page_adapter_wait`、`read_execution`、
+`navigation_execution`、`write_execution` 和 `ui_effect`。愿意合作的依赖会收到
+`AbortSignal`；即使依赖忽略 signal，Runtime 也会通过 Promise 竞争在剩余预算内返回。
+
+人工确认等待期间 Deadline 会暂停，合法确认或拒绝后继续使用剩余预算。错误确认 ID
+不会恢复计时。`outcome.error.retryable` 只表示宿主能否安全地自动重放整个任务，不代表
+Runtime 会自动重试；一旦开始过写执行，后续失败或超时都不会标记为可安全重放。写执行
+超时时继续保守返回 `writeState: 'unknown'`，已明确提交后的 UI effect 超时则保留
+`writeState: 'committed'`。
+
+Core 保持 interface-first：接入方可以只用本地确认 UI，也可以等待自己的 Gateway 或
+Approval API，再调用 `confirm`、`cancel` 或 `stop`。本包不实现、绑定或要求任何具体的
+Gateway/Approval HTTP API、鉴权方式或部署拓扑。
 
 ### 5. 取消是标记，不是文案
 
@@ -121,7 +150,8 @@ const runtime = new AgentRuntime({
   actionRouter: new ActionRouter({ adapters, navigation, resolveRouteName }),
   getRouteName: () => router.currentRoute.name,
   getPermissions: () => store.permissions,
-  getPageContext: moduleId => adapters.get(moduleId, routeName)?.getContext() ?? null,
+  getPageContext: (moduleId, signal) =>
+    adapters.get(moduleId, routeName)?.getContext(signal) ?? null,
   emit: event => ui.handle(event)
 })
 

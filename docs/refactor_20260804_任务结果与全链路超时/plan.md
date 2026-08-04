@@ -45,7 +45,7 @@
 - Create: `packages/core/src/runtime/runDeadline.spec.ts`
 - Modify: `packages/core/src/index.ts`
 
-- [ ] **Step 1：写入 RunDeadline 的失败测试**
+- [x] **Step 1：写入 RunDeadline 的失败测试**
 
 新建 `runDeadline.spec.ts`，用 fake timers 覆盖总预算、暂停、非合作 Promise 和外部 abort：
 
@@ -115,7 +115,7 @@ describe('RunDeadline', () => {
 })
 ```
 
-- [ ] **Step 2：运行新测试并确认红灯**
+- [x] **Step 2：运行新测试并确认红灯**
 
 Run:
 
@@ -125,7 +125,7 @@ npx vitest run packages/core/src/runtime/runDeadline.spec.ts
 
 Expected: FAIL；`contracts/deadline.ts` 和 `runtime/runDeadline.ts` 不存在，而不是测试夹具或 Vitest 配置错误。
 
-- [ ] **Step 3：实现 Deadline 契约**
+- [x] **Step 3：实现 Deadline 契约**
 
 `contracts/deadline.ts` 定义完整 phase 词表和 Scope：
 
@@ -152,7 +152,7 @@ export interface DeadlineScope {
 }
 ```
 
-- [ ] **Step 4：实现 RunDeadline**
+- [x] **Step 4：实现 RunDeadline**
 
 `runDeadline.ts` 必须提供以下类型和行为：
 
@@ -206,7 +206,7 @@ export function isRunDeadlineExceededError(
 6. `finally` 清理 timer 和 abort listener。
 7. `budgetMs === Infinity` 时不创建 timer，仍与 abort 竞争。
 
-- [ ] **Step 5：导出 Deadline 类型并跑绿测试**
+- [x] **Step 5：导出 Deadline 类型并跑绿测试**
 
 `packages/core/src/index.ts` 增加：
 
@@ -235,7 +235,7 @@ Expected: RunDeadline 测试全部 PASS，Core typecheck 退出码为 0。
 - Modify: `packages/core/src/execution/pageAdapterRegistry.ts`
 - Modify: `packages/core/src/execution/actionRouter.spec.ts`
 
-- [ ] **Step 1：为 Prompt signal 透传写失败测试**
+- [x] **Step 1：为 Prompt signal 透传写失败测试**
 
 在 `promptComposer.spec.ts` 增加：
 
@@ -262,7 +262,7 @@ it('将 Runtime AbortSignal 透传给模块上下文格式化', async() => {
 })
 ```
 
-- [ ] **Step 2：为 Adapter waiter Abort 清理写失败测试**
+- [x] **Step 2：为 Adapter waiter Abort 清理写失败测试**
 
 在 `actionRouter.spec.ts` 的 `PageAdapterRegistry` describe 中增加：
 
@@ -284,7 +284,7 @@ it('waitFor 在 signal abort 时立即移除 waiter', async() => {
 })
 ```
 
-- [ ] **Step 3：运行两组测试并确认红灯**
+- [x] **Step 3：运行两组测试并确认红灯**
 
 Run:
 
@@ -297,7 +297,7 @@ npx vitest run \
 
 Expected: FAIL；`ComposePromptOptions.signal`、`formatContext` 第二参数和 `waitFor` 的 signal 尚不存在。
 
-- [ ] **Step 4：扩展可选 signal 契约**
+- [x] **Step 4：扩展可选 signal 契约**
 
 按以下精确签名修改：
 
@@ -332,7 +332,7 @@ const context = await module.formatContext(
 )
 ```
 
-- [ ] **Step 5：为 RouterPort 和 NavigationCoordinator 增加可选执行选项**
+- [x] **Step 5：为 RouterPort 和 NavigationCoordinator 增加可选执行选项**
 
 `navigationCoordinator.ts` 增加：
 
@@ -377,7 +377,7 @@ private runWithDeadline<T>(
 
 `router.push` 使用 `route_navigation`，`adapters.waitFor` 使用 `page_adapter_wait`，两者都传入 `options.signal`。
 
-- [ ] **Step 6：实现 waitFor 的 Abort 资源清理**
+- [x] **Step 6：实现 waitFor 的 Abort 资源清理**
 
 `PageAdapterRegistry.waitFor` 签名增加第五个可选参数：
 
@@ -393,7 +393,7 @@ waitFor(
 
 `AdapterWaiter` 增加 `removeAbortListener?: () => void`。完成、局部超时和 abort 三条路径都调用同一个 cleanup helper，清理 timer、signal listener 和 waiter map。signal 已经 aborted 时立即返回 rejected Promise，不注册 waiter。
 
-- [ ] **Step 7：运行针对性测试**
+- [x] **Step 7：运行针对性测试**
 
 Run:
 
@@ -412,7 +412,7 @@ Expected: 两个文件全部 PASS，旧导航局部超时语义不变。
 - Modify: `packages/core/src/execution/actionRouter.ts`
 - Modify: `packages/core/src/execution/actionRouter.spec.ts`
 
-- [ ] **Step 1：为阶段传递与写入超时写失败测试**
+- [x] **Step 1：为阶段传递与写入超时写失败测试**
 
 在 `actionRouter.spec.ts` 增加一个只记录 phase 的 Scope：
 
@@ -539,7 +539,7 @@ it('committed 写入的 ui_effect 超时不降级为 unknown', async() => {
 })
 ```
 
-- [ ] **Step 2：运行新 ActionRouter 测试并确认红灯**
+- [x] **Step 2：运行新 ActionRouter 测试并确认红灯**
 
 Run:
 
@@ -550,7 +550,7 @@ npx vitest run packages/core/src/execution/actionRouter.spec.ts \
 
 Expected: FAIL；`ExecuteActionOptions.deadline` 不存在，导航和效果也未使用 Scope。
 
-- [ ] **Step 3：将 DeadlineScope 透传到所有 ActionRouter await**
+- [x] **Step 3：将 DeadlineScope 透传到所有 ActionRouter await**
 
 `ExecuteActionOptions` 增加：
 
@@ -588,7 +588,7 @@ adapter.applyUiEffect(
 )
 ```
 
-- [ ] **Step 4：跑绿 ActionRouter 全文件测试**
+- [x] **Step 4：跑绿 ActionRouter 全文件测试**
 
 Run:
 
@@ -609,7 +609,7 @@ Expected: PASS；原有中止、页面仲裁、局部导航超时和写入未知
 - Modify: `packages/core/src/testing/evalSuite.spec.ts`
 - Modify: `packages/core/src/index.ts`
 
-- [ ] **Step 1：为 Trace outcome 和旧数据恢复写失败测试**
+- [x] **Step 1：为 Trace outcome 和旧数据恢复写失败测试**
 
 在 `traceCollector.spec.ts` 增加：
 
@@ -649,7 +649,7 @@ it('继续恢复没有 outcome 的 v1 Trace', () => {
 })
 ```
 
-- [ ] **Step 2：为 Eval outcome kind/code 写失败测试**
+- [x] **Step 2：为 Eval outcome kind/code 写失败测试**
 
 在 `evalSuite.spec.ts` 增加两条用例：
 
@@ -684,7 +684,7 @@ it('未配置 expectedOutcome 时不要求旧 Trace 带 outcome', () => {
 })
 ```
 
-- [ ] **Step 3：运行 Trace/Eval 测试并确认红灯**
+- [x] **Step 3：运行 Trace/Eval 测试并确认红灯**
 
 Run:
 
@@ -696,7 +696,7 @@ npx vitest run \
 
 Expected: FAIL；TaskOutcome 类型、Trace outcome 和 `expectedOutcome` 尚不存在。
 
-- [ ] **Step 4：实现公开 TaskOutcome 契约**
+- [x] **Step 4：实现公开 TaskOutcome 契约**
 
 在 `contracts/run.ts` 中实现以下完整判别联合：
 
@@ -730,7 +730,7 @@ export type TaskOutcome =
 
 `RunSnapshot` 增加 `outcome?: TaskOutcome`。`index.ts` 导出 TaskOutcome、TaskTimeout、TaskFailure 和 TaskOutcomeError。
 
-- [ ] **Step 5：扩展 Trace 事件与持久化校验**
+- [x] **Step 5：扩展 Trace 事件与持久化校验**
 
 `TraceEvent` 增加：
 
@@ -744,7 +744,7 @@ writeState?: 'committed' | 'unknown'
 
 `RunTrace` 增加 `outcome?: TaskOutcome`，`finish` 增加第四个可选参数 `outcome?: TaskOutcome`。`isRunTrace` 需要验证 outcome 判别联合，同时继续接受 outcome 缺失的旧记录。
 
-- [ ] **Step 6：实现 Eval 的可选预期**
+- [x] **Step 6：实现 Eval 的可选预期**
 
 ```ts
 export interface ExpectedTaskOutcome {
@@ -765,7 +765,7 @@ export interface EvalCase {
 
 `evaluateTrace` 在 `expectedOutcome` 存在时追加 `OUTCOME_KIND_MISMATCH` 和 `OUTCOME_CODE_MISMATCH`；不存在时不读 Trace outcome。
 
-- [ ] **Step 7：跑绿 Trace/Eval 测试**
+- [x] **Step 7：跑绿 Trace/Eval 测试**
 
 Run:
 
@@ -785,7 +785,7 @@ Expected: PASS。
 - Modify: `packages/core/src/runtime/agentRuntime.spec.ts`
 - Modify: `packages/core/src/runtime/runFailureVisibility.spec.ts`
 
-- [ ] **Step 1：为五类 outcome 和深拷贝写失败测试**
+- [x] **Step 1：为五类 outcome 和深拷贝写失败测试**
 
 在 `agentRuntime.spec.ts` 增加或精化断言：
 
@@ -831,7 +831,7 @@ it('snapshot outcome 是深拷贝', async() => {
 
 将现有的轮次、工具数上限、工具失败、未预期异常和 `stop()` 用例分别增加对 `MAX_ROUNDS_REACHED`、`MAX_TOOL_CALLS_REACHED`、`TOOL_FAILED`、`RUNTIME_FAILED` 和 `{ kind: 'cancelled', reason: 'user_stopped' }` 的断言。
 
-- [ ] **Step 2：运行 outcome 相关测试并确认红灯**
+- [x] **Step 2：运行 outcome 相关测试并确认红灯**
 
 Run:
 
@@ -842,7 +842,7 @@ npx vitest run packages/core/src/runtime/agentRuntime.spec.ts \
 
 Expected: FAIL；当前 Snapshot 没有 outcome，且 `needsUserInput` 路径仍只返回 status completed。
 
-- [ ] **Step 3：将 ActiveRun 与 finish 改为 outcome 驱动**
+- [x] **Step 3：将 ActiveRun 与 finish 改为 outcome 驱动**
 
 ActiveRun 增加：
 
@@ -868,7 +868,7 @@ function terminalStatus(outcome: TaskOutcome): Extract<RunStatus, 'completed' | 
 
 `finish` 在迁移前写入 `run.outcome = deepClone(outcome)`，将 outcome 传给 Trace，使用 outcome error message 或 `stoppedByUser` 生成兼容 `stopReason`。
 
-- [ ] **Step 4：为失败路径生成稳定 code**
+- [x] **Step 4：为失败路径生成稳定 code**
 
 Run 内部失败不再使用 `kind: 'timeout' | ...` 和 message 组合控制流，而是构建：
 
@@ -881,7 +881,7 @@ interface RunFailure {
 
 `failAfterToolFailure` 默认 `TOOL_FAILED`，工具数上限显式传 `MAX_TOOL_CALLS_REACHED`。`RUNTIME_FAILED` 的 `retryable` 仅在 `writeExecutionStarted === false` 时为 true，其它 TaskFailure 均为 false。
 
-- [ ] **Step 5：记录 needs_input 和写入状态**
+- [x] **Step 5：记录 needs_input 和写入状态**
 
 `recordToolResult` 在 `result.needsUserInput` 时同时设置 `run.needsUserInput = true` 与 `run.requiresUserInput = true`，在 `result.writeState` 存在时记录 `run.lastWriteState`。最终 assistant 无 tool call 时：
 
@@ -891,11 +891,11 @@ return this.finish(run, run.requiresUserInput
   : { kind: 'completed' })
 ```
 
-- [ ] **Step 6：深拷贝 Snapshot 和 Runtime UI 事件**
+- [x] **Step 6：深拷贝 Snapshot 和 Runtime UI 事件**
 
 `snapshot()`、`toSnapshot()`、`lastSnapshot` 更新和 `publishState()` 都通过 `deepClone`，非终态 Snapshot 不包含 outcome。`clear()` 恢复的 idle Snapshot 保持原形状。
 
-- [ ] **Step 7：运行 AgentRuntime 现有全文件测试**
+- [x] **Step 7：运行 AgentRuntime 现有全文件测试**
 
 Run:
 
@@ -915,7 +915,7 @@ Expected: PASS；状态机迁移和终态可见文案无回归。
 - Modify: `packages/core/src/runtime/agentRuntime.ts`
 - Modify: `packages/core/src/runtime/agentRuntime.spec.ts`
 
-- [ ] **Step 1：扩展 Runtime 测试夹具以支持 DeadlineScope**
+- [x] **Step 1：扩展 Runtime 测试夹具以支持 DeadlineScope**
 
 `createRuntime` 中的 fake ActionRouter `execute` 必须在收到 `options.deadline` 时使用 risk 对应 phase 执行原 fake，使测试替身与真实 ActionRouter 的契约一致：
 
@@ -939,7 +939,7 @@ const execute = vi.fn(async(options: {
 })
 ```
 
-- [ ] **Step 2：为各非写阶段写失败测试**
+- [x] **Step 2：为各非写阶段写失败测试**
 
 在 `agentRuntime.spec.ts` 增加共用断言：
 
@@ -1016,7 +1016,7 @@ expect(snapshot).toMatchObject({
 })
 ```
 
-- [ ] **Step 3：为 stop / timeout first-wins 和非合作依赖写失败测试**
+- [x] **Step 3：为 stop / timeout first-wins 和非合作依赖写失败测试**
 
 加入：
 
@@ -1056,13 +1056,13 @@ it('Deadline 已发生时 stop 不覆盖 timed_out', async() => {
 
 LLM 忽略 signal 后 5ms 返回 timed_out 由上一步的 `model_call` 用例覆盖。
 
-- [ ] **Step 4：在 ActiveRun 上创建 RunDeadline 和 first-wins cause**
+- [x] **Step 4：在 ActiveRun 上创建 RunDeadline 和 first-wins cause**
 
 `start()` 为每个 Run 创建独立 controller 和 `RunDeadline`。`onTimeout` 只在 `run.terminationCause` 为空时写入 `{ kind: 'deadline', details }` 并返回 true。`onPhaseStart('write_execution')` 置位 `writeExecutionStarted`。
 
 `stop()` 先尝试写入 `{ kind: 'user_stopped' }`，失败时立即返回；成功后再 abort、回滚历史并 finish cancelled。
 
-- [ ] **Step 5：用 DeadlineScope 替换 chatWithDeadline 和被动超时**
+- [x] **Step 5：用 DeadlineScope 替换 chatWithDeadline 和被动超时**
 
 先将 `AgentRuntimeDependencies.getPageContext` 签名改为：
 
@@ -1090,7 +1090,7 @@ await run.deadline.run('model_call', () =>
 
 删除 `chatWithDeadline`、`timedOut` 布尔值与 `limitReason` 中的旧 timeout 分支。`limitReason` 保留轮次上限检查，每轮开头调用 `run.deadline.remainingMs()` 为 0 时通过 typed Deadline 路径结束。
 
-- [ ] **Step 6：实现 timeout outcome 和 Trace 记录**
+- [x] **Step 6：实现 timeout outcome 和 Trace 记录**
 
 新增 `finishTimedOut(run, writeState?)`，它从 first-wins details 构建：
 
@@ -1111,11 +1111,11 @@ await run.deadline.run('model_call', () =>
 
 同时记录 `deadline_exceeded` Trace event。Runtime catch 只在 `terminationCause.kind === 'deadline'` 时走 timed_out；仅有 `user_stopped` 才走 cancelled，不再将所有 `AbortError` 都解释为用户停止。
 
-- [ ] **Step 7：接入读工具 ActionRouter Deadline**
+- [x] **Step 7：接入读工具 ActionRouter Deadline**
 
 `executeRead` 将 `deadline: run.deadline` 传给 ActionRouter。ActionRouter 因 Deadline abort 返回 cancelled 后，Runtime 先记录当前 tool result，再检查 typed termination cause 并进入 `finishTimedOut`，不得把它当成用户取消或普通工具失败。
 
-- [ ] **Step 8：运行非写 Deadline 测试**
+- [x] **Step 8：运行非写 Deadline 测试**
 
 Run:
 
@@ -1133,7 +1133,7 @@ Expected: PASS。
 - Modify: `packages/core/src/runtime/agentRuntime.ts`
 - Modify: `packages/core/src/runtime/agentRuntime.spec.ts`
 
-- [ ] **Step 1：为两次 prepare 和确认暂停写失败测试**
+- [x] **Step 1：为两次 prepare 和确认暂停写失败测试**
 
 加入：
 
@@ -1194,7 +1194,7 @@ it('确认后第二次 prepare 在 write_revalidation 超时', async() => {
 })
 ```
 
-- [ ] **Step 2：为写执行未知态写失败测试**
+- [x] **Step 2：为写执行未知态写失败测试**
 
 ```ts
 it('写执行忽略 signal 时按时返回 unknown 且禁止重试', async() => {
@@ -1230,7 +1230,7 @@ it('写执行忽略 signal 时按时返回 unknown 且禁止重试', async() => 
 })
 ```
 
-- [ ] **Step 3：为已提交后 UI effect 超时写失败测试**
+- [x] **Step 3：为已提交后 UI effect 超时写失败测试**
 
 在 `agentRuntime.spec.ts` 从 `navigationCoordinator.ts` 导入 `NavigationCoordinator`，然后加入：
 
@@ -1297,7 +1297,7 @@ it('写入 committed 后 UI effect 超时保留已提交状态', async() => {
 })
 ```
 
-- [ ] **Step 4：为多 tool call 的历史补齐写失败测试**
+- [x] **Step 4：为多 tool call 的历史补齐写失败测试**
 
 模型一次返回两个读调用，第一个执行超时。断言历史中两个 ID 均恰好出现一次：
 
@@ -1311,7 +1311,7 @@ expect(new Set(toolIds).size).toBe(2)
 
 当前调用写入 Run timeout 结果，后续调用补同一 `runTimeout` 文案且不向 UI 额外渲染 tool result。
 
-- [ ] **Step 5：将 Deadline 包住两次 prepare**
+- [x] **Step 5：将 Deadline 包住两次 prepare**
 
 ```ts
 await run.deadline.run('write_preparation', () =>
@@ -1323,15 +1323,15 @@ await run.deadline.run('write_revalidation', () =>
 
 `ToolPreparationNotice` 和 `ToolPreparationError` 继续走原有语义；`RunDeadlineExceededError` 不得被归一成 `executionFailureResult`，必须返回 typed timeout 路径。
 
-- [ ] **Step 6：将 pause/resume 交给 RunDeadline**
+- [x] **Step 6：将 pause/resume 交给 RunDeadline**
 
 `beginAwaiting` 调用 `run.deadline.pause()`，`endAwaiting` 调用 `run.deadline.resume()`。移除 ActiveRun 中旧 `pausedMs` / `awaitingSince` 字段与 `activeElapsed()`，保留“先验证 ID 再 resume”的调用顺序。
 
-- [ ] **Step 7：完成写 ActionRouter 超时结果的 Runtime 裁决**
+- [x] **Step 7：完成写 ActionRouter 超时结果的 Runtime 裁决**
 
 `confirm` 将 `deadline: run.deadline` 传给 ActionRouter。ActionRouter 返回后先通过 `recordToolResult(..., { allowStoppedUi: true })` 保存真实 `unknown` / `committed`，然后若 typed termination cause 是 deadline，调用 `finishTimedOut(run, result.writeState ?? inferredWriteState)`。
 
-- [ ] **Step 8：实现 timeout 的 pending tool call 补齐**
+- [x] **Step 8：实现 timeout 的 pending tool call 补齐**
 
 新增一个私有 helper，只处理 `run.pendingToolCallIds` 中尚未追加结果的 ID：
 
@@ -1341,7 +1341,7 @@ private settlePendingCallsAfterTimeout(run: ActiveRun, currentResult?: ToolResul
 
 当前 ID 尚在 pending 且提供了 `currentResult` 时，通过 `recordToolResult` 追加一次；其它 ID 直接向 ConversationStore 追加 `{ ok: false, message: formattedRunTimeout }`并从 pending 移除。已经移除的 ID 不重复追加。
 
-- [ ] **Step 9：运行 prepare/写入/协议完整性测试**
+- [x] **Step 9：运行 prepare/写入/协议完整性测试**
 
 Run:
 
@@ -1362,7 +1362,7 @@ Expected: PASS。
 - Modify: `packages/core/README.md`
 - Modify: `packages/chat/README.md`
 
-- [ ] **Step 1：为 Chat 错误优先级写失败测试**
+- [x] **Step 1：为 Chat 错误优先级写失败测试**
 
 在 `bridge.spec.ts` 增加：
 
@@ -1389,7 +1389,7 @@ it('失败终态优先展示结构化 outcome 文案', () => {
 
 保留现有“只有 stopReason”和“两者都没有”用例作为回退验证。
 
-- [ ] **Step 2：运行 Chat 测试并确认红灯**
+- [x] **Step 2：运行 Chat 测试并确认红灯**
 
 Run:
 
@@ -1400,7 +1400,7 @@ npx vitest run packages/chat/src/bridge.spec.ts \
 
 Expected: FAIL；鸭子类型没有 outcome，失败分支仍优先 `stopReason`。
 
-- [ ] **Step 3：扩展鸭子类型并保留回退**
+- [x] **Step 3：扩展鸭子类型并保留回退**
 
 `RuntimeUiEventLike.snapshot` 增加最小结构：
 
@@ -1421,7 +1421,7 @@ session.fail(
 )
 ```
 
-- [ ] **Step 4：在跨包契约中加入确定性 Runtime 失败**
+- [x] **Step 4：在跨包契约中加入确定性 Runtime 失败**
 
 `runtimeContract.spec.ts` 在现有真实模型 describe 之前新增：
 
@@ -1450,7 +1450,7 @@ describe('运行时与会话的确定性终态契约', () => {
 
 现有真实模型 describe 继续 `skipIf`，不影响确定性契约测试。
 
-- [ ] **Step 5：更新 Core 和 Chat README**
+- [x] **Step 5：更新 Core 和 Chat README**
 
 Core README 增加：
 
@@ -1462,7 +1462,7 @@ Core README 增加：
 
 Chat README 更新失败文案优先级，并说明旧 Runtime 可继续只传 `stopReason`。
 
-- [ ] **Step 6：运行 Chat 与跨包契约测试**
+- [x] **Step 6：运行 Chat 与跨包契约测试**
 
 Run:
 
@@ -1483,7 +1483,7 @@ Expected: 确定性测试 PASS；未配置真实模型时只跳过原有真实�
 - Create: `docs/refactor_20260804_任务结果与全链路超时/test-results.md`
 - Create: `docs/refactor_20260804_任务结果与全链路超时/review.md`
 
-- [ ] **Step 1：运行集成契约核对**
+- [x] **Step 1：运行集成契约核对**
 
 逐项使用 `rg` 和 TypeScript 检查：
 
@@ -1503,7 +1503,7 @@ Expected:
 - AgentRuntime 仍只能通过 `transitionRun` 改动 status。
 - 终态 outcome 与 RunStatus 映射一致。
 
-- [ ] **Step 2：运行目标测试集**
+- [x] **Step 2：运行目标测试集**
 
 Run:
 
@@ -1521,7 +1521,7 @@ npx vitest run \
 
 Expected: 目标文件全部 PASS，无未处理 Promise rejection，无 fake timer 泄漏。
 
-- [ ] **Step 3：运行确定性页面 Agent 评估**
+- [x] **Step 3：运行确定性页面 Agent 评估**
 
 Run:
 
@@ -1531,7 +1531,7 @@ npm run eval:page-agent
 
 Expected: 命令退出码为 0；当前 `main` 的既有成功/失败基线不发生额外回归。不将该确定性结果冒充为真实模型完成率。
 
-- [ ] **Step 4：运行项目完整验证门槛**
+- [x] **Step 4：运行项目完整验证门槛**
 
 Run:
 
@@ -1541,7 +1541,7 @@ npm run verify
 
 Expected: Vitest 全仓测试、所有 workspace typecheck 和 build 全部退出 0。
 
-- [ ] **Step 5：完成集成自审**
+- [x] **Step 5：完成集成自审**
 
 检查实际 diff，重点核对：
 
@@ -1553,15 +1553,15 @@ Expected: Vitest 全仓测试、所有 workspace typecheck 和 build 全部退�
 - 迟到 Promise 不能重新发布 UI 或完成页面请求。
 - Trace 恢复不接受畸形 outcome，但接受缺失 outcome 的旧记录。
 
-- [ ] **Step 6：写入真实测试与审查记录**
+- [x] **Step 6：写入真实测试与审查记录**
 
 `test-results.md` 记录每条本轮实际执行命令、退出码、通过/失败数和关键输出；`review.md` 用表格记录契约对齐、写入安全、迟到结果、向后兼容与遗留风险。失败或未运行的命令必须原样记录，不得写成通过。
 
-- [ ] **Step 7：将设计状态和计划勾选更新为已实施**
+- [x] **Step 7：将设计状态和计划勾选更新为已实施**
 
 `design.md` 顶部状态改为“已实施并通过项目验证”；`plan.md` 只勾选实际已完成的步骤。
 
-- [ ] **Step 8：最终验证后按逻辑分组提交**
+- [x] **Step 8：最终验证后按逻辑分组提交**
 
 每次 staging 前执行：
 
@@ -1581,6 +1581,7 @@ git add \
   packages/core/src/runtime/traceCollector.spec.ts \
   packages/core/src/testing/evalSuite.ts \
   packages/core/src/testing/evalSuite.spec.ts \
+  packages/core/src/testing/index.ts \
   packages/core/src/index.ts
 test "$(git branch --show-current)" = 'refactor_20260804_任务结果与全链路超时'
 git commit -m 'refactor: 新增任务结果与共享 Deadline 契约'
@@ -1622,7 +1623,7 @@ test "$(git branch --show-current)" = 'refactor_20260804_任务结果与全链�
 git commit -m 'refactor: 记录全链路超时验证与评审结果'
 ```
 
-- [ ] **Step 9：提交后复核**
+- [x] **Step 9：提交后复核**
 
 Run:
 
