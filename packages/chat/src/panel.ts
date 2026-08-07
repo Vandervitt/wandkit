@@ -465,6 +465,10 @@ export class WandkitChatPanel extends HTMLElement {
   }
 
   private send(): void {
+    if (this.current.status === 'busy') {
+      this.dispatchEvent(new CustomEvent('stop', { bubbles: true, composed: true }))
+      return
+    }
     const text = this.input.value.trim()
     if (!text || this.isLocked()) return
     this.input.value = ''
@@ -489,7 +493,8 @@ export class WandkitChatPanel extends HTMLElement {
 
     const locked = this.isLocked()
     this.input.disabled = locked
-    this.sendButton.disabled = locked
+    this.sendButton.disabled = this.current.status === 'awaiting_confirmation'
+    this.sendButton.textContent = this.current.status === 'busy' ? '停止' : '发送'
     this.input.placeholder = PLACEHOLDER[this.current.status]
     // 空会话时清空是空动作；执行中清空更糟——Run 还在跑，抹掉历史会让接下来的
     // 助手发言落在一段没有来由的对话上。关闭按钮不受此限，收起不影响 Run。

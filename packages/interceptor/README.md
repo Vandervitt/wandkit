@@ -170,7 +170,15 @@ submitter 字段差异计算和最终原生提交都可能再次运行 FormData 
 ```ts
 import { createConfirmCardHandler } from '@wandkit/interceptor/confirm-ui'
 
-const confirm = createConfirmCardHandler({ host: document.body, mask })
+const confirmationController = new AbortController()
+const confirm = createConfirmCardHandler({
+  host: document.body,
+  mask,
+  signal: confirmationController.signal
+})
+
+// 宿主卸载时从严拒绝当前及排队中的确认
+confirmationController.abort()
 ```
 
 单独子入口，因为它 import 了 `@wandkit/ui`，而那个包在模块顶层就

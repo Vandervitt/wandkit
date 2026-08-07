@@ -52,6 +52,8 @@ export class ChatSession {
    * 里会让渲染层重新有机会把它画出来，而那正是要消除的东西。
    */
   private streamingToolCalls: ChatToolCall[] = []
+  /** 当前 Run 开始前的线协议与展示边界，用于用户中止时整轮回滚。 */
+  private safePoint?: { messageCount: number, entryCount: number }
 
   constructor(options: ChatSessionOptions = {}) {
     this.now = options.now ?? Date.now
@@ -88,6 +90,36 @@ export class ChatSession {
     // 新的一轮从零开始：留着上一轮的末步描述，会在本轮第一个工具跑完前一直显示错的东西。
     this.progress = undefined
     this.append({ role: 'user', content })
+  }
+
+  /** 在新 Run 写入用户消息前记录可回滚边界。 */
+  markSafePoint(): void {
+    this.endStreaming()
+    this.safePoint = {
+      messageCount: this.messages.length,
+      entryCount: this.entries.length
+    }
+  }
+
+  /**
+   * 丢弃安全点之后的整轮消息。
+   *
+   * 用户在工具执行中停止时，末尾可能只有 `assistant.tool_calls` 而没有配对的 `tool`
+   * 消息；保留这种历史会让下一次 OpenAI 形态请求直接被协议层拒绝。
+   */
+  rollbackToSafePoint(): void {
+    if (!this.safePoint) return
+    this.endStreaming()
+    this.messages.splice(this.safePoint.messageCount)
+    this.entries.splice(this.safePoint.entryCount)
+    this.safePoint = undefined
+    this.status = 'idle'
+    this.confirmation = undefined
+    this.error = undefined
+    this.progress = undefined
+    this.streamingIndex = null
+    this.streamingToolCalls = []
+    this.emit()
   }
 
   /**
@@ -182,6 +214,7 @@ export class ChatSession {
     this.progress = undefined
     this.streamingIndex = null
     this.streamingToolCalls = []
+    this.safePoint = undefined
     this.emit()
   }
 

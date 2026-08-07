@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  startRequestTracking,
   stopRequestTracking,
   waitForDomStable,
   watchRouteChanges,
@@ -80,6 +81,39 @@ describe('watchRouteChanges', () => {
 
     expect(() => watcher?.stop()).not.toThrow()
   })
+
+  it('stop 不覆盖后来安装在 route watcher 外层的 history patch', () => {
+    const originalPush = history.pushState
+    const originalReplace = history.replaceState
+    watcher = watchRouteChanges({ onRouteChange: vi.fn() })
+    const watchedPush = history.pushState
+    const watchedReplace = history.replaceState
+    const outerPush = function outerPush(
+      this: History,
+      ...args: Parameters<History['pushState']>
+    ) {
+      return watchedPush.apply(this, args)
+    }
+    const outerReplace = function outerReplace(
+      this: History,
+      ...args: Parameters<History['replaceState']>
+    ) {
+      return watchedReplace.apply(this, args)
+    }
+    history.pushState = outerPush
+    history.replaceState = outerReplace
+
+    try {
+      watcher.stop()
+      watcher = undefined
+
+      expect(history.pushState).toBe(outerPush)
+      expect(history.replaceState).toBe(outerReplace)
+    } finally {
+      history.pushState = originalPush
+      history.replaceState = originalReplace
+    }
+  })
 })
 
 describe('waitForDomStable', () => {
@@ -130,6 +164,81 @@ describe('waitForDomStable', () => {
 
     stopRequestTracking()
     window.fetch = originalFetch
+  })
+
+  it('显式启动后能跟踪 waitForDomStable 调用前发起的请求', async () => {
+    let resolveRequest: (value: Response) => void = () => undefined
+    const inflight = new Promise<Response>(resolve => { resolveRequest = resolve })
+    const originalFetch = window.fetch
+    stopRequestTracking()
+    window.fetch = (() => inflight) as typeof fetch
+    const releaseTracking = startRequestTracking()
+
+    void window.fetch('/api/started-before-wait')
+    let settled = false
+    const waiting = waitForDomStable({ quietMs: 30, timeoutMs: 1000 })
+      .then(stable => { settled = true; return stable })
+
+    await new Promise(resolve => setTimeout(resolve, 100))
+    expect(settled).toBe(false)
+
+    resolveRequest(new Response('[]'))
+    await expect(waiting).resolves.toBe(true)
+
+    releaseTracking()
+    window.fetch = originalFetch
+  })
+
+  it('多个显式使用者各自释放租约，最后一个释放时才卸载 tracker', () => {
+    const originalFetch = window.fetch
+    const releaseHost = startRequestTracking()
+    const trackedFetch = window.fetch
+    const releaseBrowser = startRequestTracking()
+
+    expect(typeof releaseHost).toBe('function')
+    expect(typeof releaseBrowser).toBe('function')
+    expect(window.fetch).toBe(trackedFetch)
+
+    stopRequestTracking()
+    expect(window.fetch).toBe(trackedFetch)
+
+    releaseBrowser()
+    expect(window.fetch).toBe(trackedFetch)
+
+    releaseHost()
+    expect(window.fetch).toBe(originalFetch)
+  })
+
+  it('释放租约时不覆盖后来安装在 tracker 外层的 patch', () => {
+    const originalFetch = window.fetch
+    const originalSend = XMLHttpRequest.prototype.send
+    const releaseTracking = startRequestTracking()
+    const trackedFetch = window.fetch
+    const trackedSend = XMLHttpRequest.prototype.send
+    const outerFetch = function outerFetch(
+      this: unknown,
+      ...args: Parameters<typeof fetch>
+    ) {
+      return trackedFetch.apply(this, args)
+    } as typeof fetch
+    const outerSend = function outerSend(
+      this: XMLHttpRequest,
+      ...args: Parameters<XMLHttpRequest['send']>
+    ) {
+      return trackedSend.apply(this, args)
+    }
+    window.fetch = outerFetch
+    XMLHttpRequest.prototype.send = outerSend
+
+    try {
+      releaseTracking()
+
+      expect(window.fetch).toBe(outerFetch)
+      expect(XMLHttpRequest.prototype.send).toBe(outerSend)
+    } finally {
+      window.fetch = originalFetch
+      XMLHttpRequest.prototype.send = originalSend
+    }
   })
 
   it('关闭 trackRequests 后退回纯 DOM 静默判据', async () => {

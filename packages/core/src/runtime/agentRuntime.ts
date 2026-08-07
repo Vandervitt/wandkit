@@ -3,7 +3,7 @@ import {
   resolveMessages,
   type WandkitMessages
 } from '../config/messages'
-import type { LlmMessage } from '../contracts/llm'
+import type { LlmMessage, LlmToolCall } from '../contracts/llm'
 import type { ModuleDefinition } from '../contracts/module'
 import { toOpenAIToolDefinition } from '../contracts/openAITool'
 import {
@@ -64,6 +64,8 @@ export interface RuntimeUiEvent {
   snapshot?: RunSnapshot
   activeModuleIds?: string[]
   content?: string | null
+  /** Runtime 规范化后的工具调用；与随后发出的 `tool_result` 事件严格配对。 */
+  toolCalls?: LlmToolCall[]
   confirmation?: ConfirmationRequest
   toolCallId?: string
   result?: ToolResult
@@ -629,7 +631,8 @@ export class AgentRuntime {
           // 仅在最终回答轮（无 tool_calls）向用户展示 content。
           this.dependencies.emit({
             type: 'assistant',
-            content: calls.length > 0 ? null : assistant.content
+            content: calls.length > 0 ? null : assistant.content,
+            ...(calls.length > 0 ? { toolCalls: deepClone(calls) } : {})
           })
         }
 

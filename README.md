@@ -34,6 +34,27 @@ npm run example
 
 更多示例见 [`examples/README.md`](examples/README.md)。
 
+浏览器宿主可直接使用快捷集成包：
+
+```ts
+import { mountWandkit } from '@wandkit/browser'
+
+const app = mountWandkit({
+  llm,
+  heading: 'Admin Copilot',
+  getPermissions,
+  interception: {
+    llmRequest: { method: 'POST', url: '/api/llm/chat' },
+    policy
+  }
+})
+
+app.destroy()
+```
+
+详细的安全默认值、生命周期和本地 `npm link` 方式见
+[`packages/browser/README.md`](packages/browser/README.md)。
+
 ## Monorepo 结构
 
 | 路径 | npm 包 / 用途 |
@@ -43,6 +64,7 @@ npm run example
 | [`packages/interceptor`](packages/interceptor) | `@wandkit/interceptor`：请求级写操作拦截与授权 |
 | [`packages/chat`](packages/chat) | `@wandkit/chat`：会话状态、聊天面板和 Runtime bridge |
 | [`packages/ui`](packages/ui) | `@wandkit/ui`：确认卡片和交互遮罩 |
+| [`packages/browser`](packages/browser) | `@wandkit/browser`：Runtime、页面执行、聊天 UI 与请求治理的一调用集成 |
 | [`evals/page-agent`](evals/page-agent) | 网页任务完成率基线与报告 |
 | [`examples`](examples) | 确定性、真实模型、页面执行和聊天示例 |
 
@@ -107,6 +129,7 @@ npm run eval:page-agent:real
 - [`packages/core/README.md`](packages/core/README.md)：Agent Runtime 与两阶段写入。
 - [`packages/interceptor/README.md`](packages/interceptor/README.md)：请求拦截和授权治理。
 - [`packages/chat/README.md`](packages/chat/README.md)：会话状态、UI 与 Runtime bridge。
+- [`packages/browser/README.md`](packages/browser/README.md)：浏览器快捷集成、安全默认值与本地链接。
 - [`examples/README.md`](examples/README.md)：可运行示例和本地模型配置。
 - [`docs/test_20260802_网页任务完成率基线/design.md`](docs/test_20260802_网页任务完成率基线/design.md)：评估设计与验收标准。
 

@@ -1315,11 +1315,18 @@ describe('AgentRuntime', () => {
       },
       finalReply('共 2 条')
     ])
-    const { runtime, execute } = createRuntime(llm)
+    const { runtime, execute, emit } = createRuntime(llm)
 
     const result = await runtime.start('查询线路')
 
     expect(execute).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'assistant',
+      content: null,
+      toolCalls: [expect.objectContaining({
+        function: expect.objectContaining({ name: 'gateway_query_v1' })
+      })]
+    }))
     expect(result.status).toBe('completed')
   })
 

@@ -23,6 +23,10 @@ export interface ConfirmCardHandlerOptions {
   /** 卡片挂载点。宿主决定它在页面上的位置。 */
   host: HTMLElement
   /**
+   * 取消当前及排队中的全部确认。常由宿主在卸载或销毁时触发；取消一律按拒绝处理。
+   */
+  signal?: AbortSignal
+  /**
    * 交互遮罩。
    *
    * 给了就在确认期间自动解除、决定后恢复——遮罩的作用是挡住用户操作页面，而确认
@@ -46,6 +50,7 @@ export function createConfirmCardHandler(
 
   return input => {
     const run = async (): Promise<boolean> => {
+      if (options.signal?.aborted) return false
       const confirmationId = `interceptor-${++sequence}`
       const card = options.host.ownerDocument.createElement(CONFIRM_CARD_TAG) as
         HTMLElement & { data: ConfirmCardData }
@@ -64,19 +69,33 @@ export function createConfirmCardHandler(
       options.mask?.disarm()
       options.host.appendChild(card)
 
+      let removeAbortListener = (): void => undefined
       try {
         return await new Promise<boolean>(resolve => {
+          let settled = false
+          const settle = (approved: boolean): void => {
+            if (settled) return
+            settled = true
+            resolve(approved)
+          }
           const decide = (approved: boolean) => (event: Event) => {
             const detail = (event as CustomEvent<{ confirmationId?: string }>).detail
             // ID 校验让过期卡片变得无害：上一次遗留在屏幕上的卡片回传的是旧 ID，
             // 放行它等于用旧的同意批准这一次。
             if (detail?.confirmationId !== confirmationId) return
-            resolve(approved)
+            settle(approved)
           }
           card.addEventListener('approve', decide(true))
           card.addEventListener('reject', decide(false))
+          if (options.signal) {
+            const onAbort = (): void => settle(false)
+            options.signal.addEventListener('abort', onAbort, { once: true })
+            removeAbortListener = () => options.signal?.removeEventListener('abort', onAbort)
+            if (options.signal.aborted) onAbort()
+          }
         })
       } finally {
+        removeAbortListener()
         card.remove()
         if (shouldRearm) options.mask?.arm()
       }

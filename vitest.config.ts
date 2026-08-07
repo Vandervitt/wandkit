@@ -12,6 +12,30 @@ export default defineConfig({
       {
         find: /^@wandkit\/ui$/,
         replacement: fileURLToPath(new URL('./packages/ui/src/index.ts', import.meta.url))
+      },
+      {
+        find: /^@wandkit\/executor$/,
+        replacement: fileURLToPath(new URL('./packages/executor/src/index.ts', import.meta.url))
+      },
+      {
+        find: /^@wandkit\/chat\/ui$/,
+        replacement: fileURLToPath(new URL('./packages/chat/src/ui.ts', import.meta.url))
+      },
+      {
+        find: /^@wandkit\/chat\/bridge$/,
+        replacement: fileURLToPath(new URL('./packages/chat/src/bridge.ts', import.meta.url))
+      },
+      {
+        find: /^@wandkit\/chat$/,
+        replacement: fileURLToPath(new URL('./packages/chat/src/index.ts', import.meta.url))
+      },
+      {
+        find: /^@wandkit\/interceptor\/confirm-ui$/,
+        replacement: fileURLToPath(new URL('./packages/interceptor/src/confirmUi.ts', import.meta.url))
+      },
+      {
+        find: /^@wandkit\/interceptor$/,
+        replacement: fileURLToPath(new URL('./packages/interceptor/src/index.ts', import.meta.url))
       }
     ]
   },
@@ -32,6 +56,7 @@ export default defineConfig({
       ['packages/executor/**', 'jsdom'],
       ['packages/chat/**', 'jsdom'],
       ['packages/interceptor/**', 'jsdom'],
+      ['packages/browser/**', 'jsdom'],
       ['evals/page-agent/site/**/*.spec.ts', 'jsdom']
     ]
   }

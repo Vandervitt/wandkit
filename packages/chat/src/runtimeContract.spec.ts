@@ -61,31 +61,19 @@ const queryTool = defineReadTool({
 })
 
 /**
- * 按接入文档推荐的方式把两边接起来。
+ * 按接入文档推荐的方式把两边直接接起来。
  *
- * `emit` 只补 `toolCalls`（核心的事件确实不带它，README 明确要求宿主补）。
- * **不在这里替核心补 `stopReason`**：那正是要验证的事——宿主没有额外做任何事时，
- * 失败也必须是可见的。
+ * **不在宿主补 `toolCalls` 或 `stopReason`**：这两个字段都必须由核心事件完整提供，
+ * 否则兼容 content 规范化和失败原因会在跨包边界丢失。
  */
 function connect(options: { llm?: AgentRuntimeDependencies['llm'] } = {}) {
   const registry = createToolRegistry([gatewayModule], [queryTool])
   const session = new ChatSession()
   const handlers: Array<(event: RuntimeUiEventLike) => void> = []
   const events: RuntimeUiEvent[] = []
-  let lastToolCalls: RuntimeUiEventLike['toolCalls']
-
-  // 按 README 的做法从模型响应里捕获 tool_calls 补给桥接层——核心的事件不带它。
-  const upstream = options.llm ?? createRealLlm()
-  const llm: AgentRuntimeDependencies['llm'] = {
-    async chat(messages, tools, signal) {
-      const reply = await upstream.chat(messages, tools, signal)
-      lastToolCalls = reply.tool_calls as RuntimeUiEventLike['toolCalls']
-      return reply
-    }
-  }
 
   const runtime = new AgentRuntime({
-    llm,
+    llm: options.llm ?? createRealLlm(),
     registry,
     resolveCandidates: () => ['gateway'],
     composePrompt: async({ history }) => history as LlmMessage[],
@@ -97,10 +85,7 @@ function connect(options: { llm?: AgentRuntimeDependencies['llm'] } = {}) {
     getPageContext: async() => null,
     emit: event => {
       events.push(event)
-      handlers.forEach(handler => handler({
-        ...event,
-        ...(event.type === 'assistant' ? { toolCalls: lastToolCalls } : {})
-      } as RuntimeUiEventLike))
+      handlers.forEach(handler => handler(event as RuntimeUiEventLike))
     }
   })
 

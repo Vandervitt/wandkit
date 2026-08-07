@@ -86,37 +86,15 @@ snapshot.outcome.error.message
 留下可见错误，不会静默切回 `idle`。这一兼容通过最小鸭子类型完成，chat 包仍不 import
 或硬依赖 Core。
 
-### assistant 事件要补上 tool_calls
+### assistant 事件自带规范化后的 tool_calls
 
-核心的 `RuntimeUiEvent` **不带** `tool_calls`。缺了它，随后的 tool 结果在导出历史里
-会成为没有发起者的孤儿——OpenAI 协议要求每条 `tool` 消息都由某个 `tool_calls` 发起，
-厂商会拒绝整条会话。
+核心的 `RuntimeUiEvent.toolCalls` 直接携带 Runtime 最终采用的工具调用，宿主只需原样
+转发事件。这里不能从原始模型响应自行补字段：Runtime 会把严格的兼容 content 格式
+规范化成标准 `tool_calls`，原始响应里可能根本没有该字段。
 
-宿主从模型响应里捕获后补给桥接层：
-
-```ts
-let lastToolCalls
-const llm = {
-  async chat(...args) {
-    const reply = await backend.chat(...args)
-    lastToolCalls = reply.tool_calls
-    return reply
-  }
-}
-
-const runtime = new AgentRuntime({
-  llm,
-  // …
-  emit: event => {
-    const enriched = event.type === 'assistant'
-      ? { ...event, toolCalls: lastToolCalls }
-      : event
-    handlers.forEach(handler => handler(enriched))
-  }
-})
-```
-
-顺带的好处是界面能显示「Agent 正在调用哪个工具」。
+桥接层会把 `assistant.tool_calls` 与后续 `tool` 结果按 OpenAI 协议写入线历史。用户在
+工具执行中停止时，Runtime 与 ChatSession 都回滚到本轮开始前，避免留下未配对调用污染
+下一轮请求。
 
 **过期确认 ID 不会打到运行时上**：上一个 Run 遗留在屏幕上的卡片回传的是已不当前的
 ID，放行它等于用旧的同意批准当前这次写入。
@@ -139,14 +117,16 @@ container.appendChild(panel)
 
 | 事件 | 触发 | 谁来做 |
 |---|---|---|
+| `stop` | 执行中点击“停止” | 宿主。通常调用 `ChatControls.stop()` 终止当前 Run |
 | `new-chat` | 点垃圾桶 | 宿主。通常是 `session.clear()`，外加收拾会话之外的残留（遮罩、挂起的闸门 Promise） |
 | `close` | 点关闭 | 悬浮壳自动收起；不用壳的接入方自己监听 |
 
 两个都**只派发事件，不自己动手**：面板不持有状态，清空得由持有它的一方来做；收起与否更是
 壳的事，面板不该知道自己被装在什么里面。
 
-执行中与空会话时新建按钮不可点——前者会让运行中的 Run 失去落点，后者是个什么都不做的按钮。
-关闭任何时候都能点，收起不影响 Run。
+执行中发送按钮切换为“停止”，输入框与新建按钮保持锁定；等待确认时停止按钮也不可用，只能先
+处理确认卡片。空会话时新建按钮不可点，避免提供一个什么都不做的动作。关闭任何时候都能点，
+收起不影响 Run。
 
 样式通过 `::part()` 与 CSS 变量定制：
 

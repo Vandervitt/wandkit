@@ -82,6 +82,30 @@ describe('运行时事件 → 会话状态', () => {
     expect(messages[1]).toMatchObject({ role: 'tool', tool_call_id: 'c1' })
   })
 
+  it('工具执行中停止后回滚本轮历史，不保留未配对的 tool_calls', async () => {
+    const { runtime, onEvent } = createRuntime()
+    const controls = connectRuntime(session, runtime, { onEvent })
+    await controls.send('读取页面')
+    runtime.emit({
+      type: 'assistant',
+      content: null,
+      toolCalls: [{
+        id: 'c1', type: 'function',
+        function: { name: 'page_read_v1', arguments: '{}' }
+      }]
+    })
+
+    controls.stop()
+    runtime.emit({
+      type: 'state',
+      snapshot: { runId: 'run-1', traceId: 'trace-1', status: 'cancelled' }
+    })
+
+    expect(session.toMessages()).toEqual([])
+    expect(session.state.entries).toEqual([])
+    expect(session.state.status).toBe('idle')
+  })
+
   it('带工具调用的轮次不产生条目，工具名不出现在界面上', () => {
     const { runtime, onEvent } = createRuntime()
     connectRuntime(session, runtime, { onEvent })
@@ -281,6 +305,31 @@ describe('会话动作 → 运行时', () => {
 
     expect(session.state.entries[0].content).toBe('把张三删掉')
     expect(runtime.started).toEqual(['把张三删掉'])
+  })
+
+  it('Run 活动期间忽略重复 send，不覆盖停止回滚的安全点', async () => {
+    const { runtime, onEvent } = createRuntime()
+    const controls = connectRuntime(session, runtime, { onEvent })
+    await controls.send('读取页面')
+    runtime.emit({
+      type: 'assistant',
+      content: null,
+      toolCalls: [{
+        id: 'c1', type: 'function',
+        function: { name: 'page_read_v1', arguments: '{}' }
+      }]
+    })
+
+    await controls.send('重复发送')
+    controls.stop()
+    runtime.emit({
+      type: 'state',
+      snapshot: { runId: 'run-1', traceId: 'trace-1', status: 'cancelled' }
+    })
+
+    expect(runtime.started).toEqual(['读取页面'])
+    expect(session.toMessages()).toEqual([])
+    expect(session.state.status).toBe('idle')
   })
 
   it('批准确认时调用运行时的 confirm', async () => {

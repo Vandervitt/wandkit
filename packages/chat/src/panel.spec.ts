@@ -179,11 +179,19 @@ describe('输入', () => {
     expect(onSend).not.toHaveBeenCalled()
   })
 
-  it('busy 时锁住输入——上一轮还没了结', () => {
+  it('busy 时锁住输入但提供停止操作', () => {
     const panel = mount({ status: 'busy' })
+    const onStop = vi.fn()
+    panel.addEventListener('stop', onStop)
+    const sendButton = partOf(panel, 'send') as HTMLButtonElement
 
     expect((partOf(panel, 'input') as HTMLTextAreaElement).disabled).toBe(true)
-    expect((partOf(panel, 'send') as HTMLButtonElement).disabled).toBe(true)
+    expect(sendButton.disabled).toBe(false)
+    expect(sendButton.textContent).toBe('停止')
+
+    sendButton.click()
+
+    expect(onStop).toHaveBeenCalledTimes(1)
   })
 
   it('等待确认时同样锁住输入', () => {
@@ -191,18 +199,32 @@ describe('输入', () => {
     const panel = mount({ status: 'awaiting_confirmation' })
 
     expect((partOf(panel, 'input') as HTMLTextAreaElement).disabled).toBe(true)
+    expect((partOf(panel, 'send') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it('锁定期间即使调用 send 也不派发', () => {
-    const panel = mount({ status: 'busy' })
+  it('等待确认期间即使点击按钮也不派发 send 或 stop', () => {
+    const panel = mount({ status: 'awaiting_confirmation' })
     const onSend = vi.fn()
+    const onStop = vi.fn()
     panel.addEventListener('send', onSend)
+    panel.addEventListener('stop', onStop)
     const input = partOf(panel, 'input') as HTMLTextAreaElement
     input.value = '试图插队'
 
     ;(partOf(panel, 'send') as HTMLButtonElement).click()
 
     expect(onSend).not.toHaveBeenCalled()
+    expect(onStop).not.toHaveBeenCalled()
+  })
+
+  it('从 busy 回到 idle 后恢复发送', () => {
+    const panel = mount({ status: 'busy' })
+    const sendButton = partOf(panel, 'send') as HTMLButtonElement
+
+    panel.state = { entries: [], status: 'idle' }
+
+    expect(sendButton.disabled).toBe(false)
+    expect(sendButton.textContent).toBe('发送')
   })
 
   it('send 事件穿透 Shadow 边界，便于宿主做事件委托', () => {

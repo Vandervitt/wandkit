@@ -192,6 +192,26 @@ describe('用户决定', () => {
 })
 
 describe('并发确认', () => {
+  it('AbortSignal 从严拒绝当前和队列中的确认', async () => {
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    const controller = new AbortController()
+    const confirm = createConfirmCardHandler({ host, signal: controller.signal })
+
+    const first = confirm({ request: request({ id: 'a' }), risk: 'write' })
+    const second = confirm({ request: request({ id: 'b' }), risk: 'write' })
+    await Promise.resolve()
+    controller.abort()
+
+    const outcome = await Promise.race([
+      Promise.all([first, second]),
+      new Promise<'timeout'>(resolve => setTimeout(() => resolve('timeout'), 50))
+    ])
+
+    expect(outcome).toEqual([false, false])
+    expect(host.children).toHaveLength(0)
+  })
+
   it('逐个确认，不同时堆两张卡片', async () => {
     // 堆在一起会让人分不清自己批的是哪一个，审计记录也说不清。
     const host = document.createElement('div')

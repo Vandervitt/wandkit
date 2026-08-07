@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "wandkit": ["../core/src/index.ts"],
+      "@wandkit/chat": ["../chat/src/index.ts"],
+      "@wandkit/chat/ui": ["../chat/src/ui.ts"],
+      "@wandkit/chat/bridge": ["../chat/src/bridge.ts"],
+      "@wandkit/executor": ["../executor/src/index.ts"],
+      "@wandkit/interceptor": ["../interceptor/src/index.ts"],
+      "@wandkit/interceptor/confirm-ui": ["../interceptor/src/confirmUi.ts"],
+      "@wandkit/ui": ["../ui/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

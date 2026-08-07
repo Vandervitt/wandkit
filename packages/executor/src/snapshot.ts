@@ -208,6 +208,14 @@ export const DEFAULT_VIEWPORT_EXPANSION = 100
 
 export interface CaptureOptions {
   /**
+   * 从页面快照中排除元素。
+   *
+   * 每个 composed-tree 元素都会调用一次，适合过滤宿主自身的 Agent UI、调试面板等
+   * 不应被模型读取或操作的区域。若要排除整个 Shadow DOM 子树，谓词需沿 composed
+   * parent 向上判断其 Host。
+   */
+  exclude?(element: Element): boolean
+  /**
    * 是否把 `cursor: pointer` 的元素也算作可点，缺省开启。
    *
    * 关掉会漏掉组件库用无语义标签实现的交互（下拉选项、自定义菜单项）；开着的代价是
@@ -388,6 +396,7 @@ export function capturePageWithElements(
   }
 
   for (const element of candidates) {
+    if (options.exclude?.(element)) continue
     if (!detectCursor && !element.matches(CANDIDATE_SELECTOR)) continue
     if (!isVisible(element, cache, layout)) continue
     // 层级：文档序遍历下，栈里留着的都是当前元素的祖先。逐个弹出不再包含它的，

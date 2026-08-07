@@ -165,6 +165,32 @@ describe('capturePage —— 索引', () => {
 })
 
 describe('capturePage —— composed tree', () => {
+  it('exclude 谓词同时过滤宿主与 Shadow DOM 内部控件', () => {
+    const pageButton = document.createElement('button')
+    pageButton.textContent = '业务按钮'
+    const widget = document.createElement('aside')
+    const root = widget.attachShadow({ mode: 'open' })
+    const widgetButton = document.createElement('button')
+    widgetButton.textContent = '助手停止'
+    root.appendChild(widgetButton)
+    document.body.append(pageButton, widget)
+
+    const excluded = (element: Element): boolean => {
+      let current: Element | null = element
+      while (current) {
+        if (current === widget) return true
+        const currentRoot = current.getRootNode()
+        current = current.parentElement ?? (
+          currentRoot instanceof ShadowRoot ? currentRoot.host : null
+        )
+      }
+      return false
+    }
+
+    expect(capturePage(document, { exclude: excluded }).elements.map(item => item.name))
+      .toEqual(['业务按钮'])
+  })
+
   it('普通 DOM、影子树和 slot 内容按渲染顺序共享连续索引', () => {
     const before = document.createElement('button')
     before.textContent = '之前'

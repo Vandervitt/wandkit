@@ -64,18 +64,24 @@ export function watchRouteChanges(options: RouteWatcherOptions): RouteWatcher {
   const originalPush = history.pushState
   const originalReplace = history.replaceState
 
-  history.pushState = function pushState(...args: Parameters<History['pushState']>) {
+  const patchedPushState = function pushState(
+    this: History,
+    ...args: Parameters<History['pushState']>
+  ) {
     const result = originalPush.apply(this, args)
     notifyAsync()
     return result
   }
-  history.replaceState = function replaceState(
+  const patchedReplaceState = function replaceState(
+    this: History,
     ...args: Parameters<History['replaceState']>
   ) {
     const result = originalReplace.apply(this, args)
     notifyAsync()
     return result
   }
+  history.pushState = patchedPushState
+  history.replaceState = patchedReplaceState
 
   view.addEventListener('popstate', notify)
   view.addEventListener('hashchange', notify)
@@ -86,8 +92,8 @@ export function watchRouteChanges(options: RouteWatcherOptions): RouteWatcher {
       stopped = true
       // 仅当仍是我们装上去的那个函数时才还原：期间可能有别人也包装了一层，
       // 直接覆盖会把人家的包装抹掉。
-      if (history.pushState !== originalPush) history.pushState = originalPush
-      if (history.replaceState !== originalReplace) history.replaceState = originalReplace
+      if (history.pushState === patchedPushState) history.pushState = originalPush
+      if (history.replaceState === patchedReplaceState) history.replaceState = originalReplace
       view.removeEventListener('popstate', notify)
       view.removeEventListener('hashchange', notify)
     }
@@ -122,11 +128,22 @@ export interface WaitForStableOptions {
  */
 interface RequestTracker {
   readonly pending: number
+  isOutermost(): boolean
   subscribe(listener: () => void): () => void
   stop(): void
 }
 
-let sharedTracker: RequestTracker | undefined
+interface SharedRequestTracker {
+  tracker: RequestTracker
+  leases: number
+}
+
+interface RequestTrackerLease {
+  tracker?: RequestTracker
+  release(): void
+}
+
+let sharedTracker: SharedRequestTracker | undefined
 
 /**
  * 安装（或复用）全局在途请求计数器。
@@ -135,11 +152,12 @@ let sharedTracker: RequestTracker | undefined
  * 且卸载顺序一旦交错就会把别人的包装抹掉。
  */
 function ensureRequestTracker(): RequestTracker | undefined {
-  if (sharedTracker) return sharedTracker
+  if (sharedTracker) return sharedTracker.tracker
   const view = typeof window === 'undefined' ? undefined : window
   if (!view) return undefined
 
   let pending = 0
+  let active = true
   const listeners = new Set<() => void>()
   const notify = (): void => listeners.forEach(listener => listener())
   const settle = (): void => {
@@ -148,47 +166,107 @@ function ensureRequestTracker(): RequestTracker | undefined {
   }
 
   const originalFetch = view.fetch
+  let patchedFetch: typeof fetch | undefined
   if (typeof originalFetch === 'function') {
-    view.fetch = function patchedFetch(...args: Parameters<typeof fetch>) {
+    patchedFetch = function requestTrackingFetch(
+      this: unknown,
+      ...args: Parameters<typeof fetch>
+    ) {
+      if (!active) return originalFetch.apply(this, args)
       pending += 1
       notify()
       return originalFetch.apply(this, args).finally(settle)
     }
+    view.fetch = patchedFetch
   }
 
   const XHR = view.XMLHttpRequest
   const originalSend = XHR?.prototype.send
+  let patchedSend: XMLHttpRequest['send'] | undefined
   if (originalSend) {
-    XHR.prototype.send = function patchedSend(
+    patchedSend = function requestTrackingSend(
+      this: XMLHttpRequest,
       ...args: Parameters<XMLHttpRequest['send']>
     ) {
+      if (!active) return originalSend.apply(this, args)
       pending += 1
       notify()
       // `loadend` 覆盖成功、失败与中止三种终态，比监听 `load` 可靠。
       this.addEventListener('loadend', settle, { once: true })
       return originalSend.apply(this, args)
     }
+    XHR.prototype.send = patchedSend
   }
 
-  sharedTracker = {
+  const tracker: RequestTracker = {
     get pending() { return pending },
+    isOutermost() {
+      return (!patchedFetch || view.fetch === patchedFetch) &&
+        (!patchedSend || XHR?.prototype.send === patchedSend)
+    },
     subscribe(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)
     },
     stop() {
-      if (typeof originalFetch === 'function') view.fetch = originalFetch
-      if (originalSend && XHR) XHR.prototype.send = originalSend
+      active = false
+      if (patchedFetch && view.fetch === patchedFetch) view.fetch = originalFetch
+      if (patchedSend && originalSend && XHR?.prototype.send === patchedSend) {
+        XHR.prototype.send = originalSend
+      }
       listeners.clear()
-      sharedTracker = undefined
     }
   }
-  return sharedTracker
+  sharedTracker = { tracker, leases: 0 }
+  return tracker
 }
 
-/** 卸载在途请求计数器。测试与页面卸载时调用。 */
+function acquireRequestTracker(): RequestTrackerLease {
+  const tracker = ensureRequestTracker()
+  if (!tracker || !sharedTracker) return { release: () => undefined }
+  const owner = sharedTracker
+  owner.leases += 1
+  let released = false
+  return {
+    tracker,
+    release() {
+      if (released) return
+      released = true
+      if (sharedTracker !== owner) return
+      owner.leases = Math.max(0, owner.leases - 1)
+      if (owner.leases > 0) return
+      owner.tracker.stop()
+      if (sharedTracker === owner) sharedTracker = undefined
+    }
+  }
+}
+
+/**
+ * 显式安装全局在途请求计数器。
+ *
+ * 宿主应在页面动作可能发起请求之前调用，避免第一次
+ * {@link waitForDomStable} 执行前已经发出的请求漏记。
+ */
+export function startRequestTracking(): () => void {
+  const lease = acquireRequestTracker()
+  if (lease.tracker && !lease.tracker.isOutermost()) {
+    lease.release()
+    throw new Error('request tracker 必须位于其他请求 patch 的最外层')
+  }
+  return lease.release
+}
+
+/**
+ * 尝试卸载没有租约持有者的旧 tracker。
+ *
+ * @deprecated 新代码应保存并调用 {@link startRequestTracking} 返回的释放函数。活跃租约
+ * 存在时本函数刻意不做任何事，避免一个使用者破坏其他实例的请求跟踪。
+ */
 export function stopRequestTracking(): void {
-  sharedTracker?.stop()
+  if (!sharedTracker || sharedTracker.leases > 0) return
+  const owner = sharedTracker
+  owner.tracker.stop()
+  if (sharedTracker === owner) sharedTracker = undefined
 }
 
 /**
@@ -211,7 +289,10 @@ export function waitForDomStable(
   const root = options.root ?? (typeof document === 'undefined' ? undefined : document)
   if (!root || typeof MutationObserver === 'undefined') return Promise.resolve(true)
 
-  const tracker = options.trackRequests === false ? undefined : ensureRequestTracker()
+  const trackerLease = options.trackRequests === false
+    ? undefined
+    : acquireRequestTracker()
+  const tracker = trackerLease?.tracker
 
   return new Promise<boolean>(resolve => {
     let quietTimer: ReturnType<typeof setTimeout> | undefined
@@ -225,6 +306,7 @@ export function waitForDomStable(
       clearTimeout(deadline)
       observer.disconnect()
       unsubscribe?.()
+      trackerLease?.release()
       resolve(stable)
     }
 

@@ -1,0 +1,48 @@
+{
+  "name": "@wandkit/browser",
+  "version": "0.1.0",
+  "description": "One-call browser integration for Wandkit runtime, DOM executor, chat UI, interaction mask, and request interception.",
+  "keywords": [
+    "wandkit",
+    "browser",
+    "gui-agent",
+    "copilot"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": [
+    "./dist/index.js",
+    "./dist/index.cjs"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@wandkit/chat": "^0.1.0",
+    "@wandkit/executor": "^0.1.0",
+    "@wandkit/interceptor": "^0.1.0",
+    "@wandkit/ui": "^0.1.0",
+    "wandkit": "^0.1.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^5.4.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -25,9 +25,9 @@ export interface RuntimeUiEventLike {
   /**
    * 本轮 assistant 发起的工具调用。
    *
-   * 核心当前的 `RuntimeUiEvent` 没有这个字段，宿主需在 `emit` 里从模型响应带上。
-   * **不带的话导出的历史是非法的**：`tool` 消息会变成没有发起者的孤儿，而 OpenAI
-   * 协议要求每条 tool 消息都由某个 `tool_calls` 发起，厂商会拒绝整条会话。
+   * 新版核心的 `RuntimeUiEvent` 会直接带上规范化结果；旧 Runtime 也可按同一鸭子类型
+   * 补充。**不带的话导出的历史是非法的**：`tool` 消息会变成没有发起者的孤儿，而
+   * OpenAI 协议要求每条 tool 消息都由某个 `tool_calls` 发起，厂商会拒绝整条会话。
    */
   toolCalls?: ChatToolCall[]
   confirmation?: ChatConfirmation
@@ -108,6 +108,8 @@ export function connectRuntime(
    * 为空，事件被整条丢弃后 Run 照样 completed，界面上什么都没多出来。
    */
   let answered = false
+  /** 防止公开 controls 被绕过 UI 锁定后并发启动第二个 Run，覆盖本轮安全点。 */
+  let runActive = false
 
   options.onEvent(event => {
     if (disposed) return
@@ -138,11 +140,14 @@ export function connectRuntime(
         if (event.confirmation) session.requestConfirmation(event.confirmation)
         break
       case 'state':
+        if (TERMINAL_STATUSES.has(event.snapshot?.status ?? '')) runActive = false
+        if (event.snapshot?.status === 'cancelled') session.rollbackToSafePoint()
         applyRunStatus(session, event, messages, answered)
         break
       case 'clear':
         session.clear()
         answered = false
+        runActive = false
         break
     }
   })
@@ -163,10 +168,18 @@ export function connectRuntime(
 
   return {
     async send(text) {
+      if (runActive) return
       // 新的一轮重新开始计「有没有回答过」。批准/拒绝不重置：那是同一轮的延续。
+      runActive = true
       answered = false
+      session.markSafePoint()
       session.appendUser(text)
-      await guard(() => runtime.start(text))
+      try {
+        await runtime.start(text)
+      } catch (error) {
+        runActive = false
+        session.fail(error instanceof Error ? error.message : String(error))
+      }
     },
     async approve(confirmationId) {
       // 先过会话的 ID 校验：过期卡片回传的 ID 不该打到运行时上。

@@ -33,6 +33,7 @@ export type { PageControllerOptions } from './controller'
 export {
   watchRouteChanges,
   waitForDomStable,
+  startRequestTracking,
   stopRequestTracking,
   DEFAULT_QUIET_MS,
   DEFAULT_STABLE_TIMEOUT_MS
