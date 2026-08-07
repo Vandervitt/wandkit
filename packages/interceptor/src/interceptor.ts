@@ -341,14 +341,22 @@ function patchXhr(
       channel: 'xhr',
       timestamp: Date.now()
     }
-    void gate(request).then(allowed => {
-      // 被拒时什么也不做：请求从未发出，宿主的 error/timeout 处理不会被触发。
-      // 这与 fetch 侧抛 RequestDeniedError 不同——XHR 没有可以抛错的返回值。
-      // 等待期间重新 open() 会替换状态对象；旧批准不能发送新的 XHR 配置。
-      if (allowed && lifecycle.active && callState.get(this) === state) {
-        originalSend.apply(this, args)
+    void gate(request).then(
+      allowed => {
+        // 等待期间重新 open() 会替换状态对象；旧判定不能影响新的 XHR 配置。
+        if (!lifecycle.active || callState.get(this) !== state) return
+        if (allowed) {
+          originalSend.apply(this, args)
+          return
+        }
+        finishDeniedXhr(view, this)
+      },
+      () => {
+        // 闸门本身异常也必须从严拒绝，并让 Axios 等宿主结束等待。
+        if (!lifecycle.active || callState.get(this) !== state) return
+        finishDeniedXhr(view, this)
       }
-    })
+    )
   } as typeof XMLHttpRequest.prototype.send
   markPatch(patchedOpen, 'xhr-open', lifecycle, originalOpen)
   markPatch(patchedSend, 'xhr-send', lifecycle, originalSend)
@@ -364,6 +372,20 @@ function patchXhr(
       XHR.prototype.send = skipInactivePatches(originalSend, 'xhr-send')
     }
   }
+}
+
+/**
+ * XHR 的 `send()` 没有 Promise 可供拒绝，只能用标准生命周期事件告知宿主。
+ *
+ * 请求从未交给原生 `send()`，因此调用原生 `abort()` 不会派发事件；这里显式派发
+ * `abort` 和 `loadend`，让 Axios 的 `onabort` 拒绝 Promise，并让通用清理逻辑收尾。
+ */
+function finishDeniedXhr(
+  view: Window & typeof globalThis,
+  request: XMLHttpRequest
+): void {
+  request.dispatchEvent(new view.ProgressEvent('abort'))
+  request.dispatchEvent(new view.ProgressEvent('loadend'))
 }
 
 /**

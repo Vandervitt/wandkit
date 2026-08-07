@@ -152,8 +152,9 @@ submitter 字段差异计算和最终原生提交都可能再次运行 FormData 
 **XHR 的同步时序**：`send()` 必须同步返回，而判定是异步的，因此真正的发送被推迟。
 依赖「`send` 返回即已发出」的宿主代码会看到时序变化。
 
-另一处不对称：fetch 被拒时抛 `RequestDeniedError`，**XHR 被拒时什么也不做**——它没有
-可以抛错的返回值，宿主的 `error` / `timeout` 处理都不会触发。
+另一处不对称：fetch 被拒时抛 `RequestDeniedError`；XHR 的 `send()` 没有可以拒绝的
+返回值，因此请求不会交给原生 `send()`，并显式派发 `abort` 与 `loadend`。宿主应通过
+`onabort` 或 `loadend` 结束等待并清理 loading 状态。
 
 **`sendBeacon` 无法挂起**：它设计上发生在 unload 期、同步返回 boolean，等不了异步
 确认。默认拒发并通过 `onUnholdableRequest` 让接入方知情。

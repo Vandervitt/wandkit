@@ -396,6 +396,36 @@ describe('XMLHttpRequest', () => {
     expect(sent).toHaveLength(0)
   })
 
+  it('拒绝时用 abort 和 loadend 结束 XHR 生命周期', async () => {
+    setup({ confirm: vi.fn(async () => false) })
+    const events: string[] = []
+    const request = new XMLHttpRequest()
+    request.addEventListener('abort', () => events.push('abort'))
+    request.addEventListener('loadend', () => events.push('loadend'))
+
+    request.open('DELETE', '/api/users/u_1')
+    request.send()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(sent).toHaveLength(0)
+    expect(events).toEqual(['abort', 'loadend'])
+  })
+
+  it('确认回调抛错时也拒发并结束 XHR 生命周期', async () => {
+    setup({ confirm: vi.fn(async () => { throw new Error('confirm failed') }) })
+    const events: string[] = []
+    const request = new XMLHttpRequest()
+    request.addEventListener('abort', () => events.push('abort'))
+    request.addEventListener('loadend', () => events.push('loadend'))
+
+    request.open('DELETE', '/api/users/u_1')
+    request.send()
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(sent).toHaveLength(0)
+    expect(events).toEqual(['abort', 'loadend'])
+  })
+
   it('解析 JSON 请求体供规则判定', async () => {
     const seen: unknown[] = []
     setup({}, {
